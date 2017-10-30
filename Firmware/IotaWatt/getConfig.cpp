@@ -154,7 +154,9 @@ boolean getConfig(void)
   trace(T_CONFIG,8);
   if(serverType.equals("emoncms")) {
     if(influxStarted) influxStop = true;
+    if (pvoutputStarted) pvoutputStop = true;
     SD.remove((char *)influxPostLogFile.c_str());
+    SD.remove((char *)pvoutputPostLogFile.c_str());
     EmonURL = Config["server"]["url"].as<String>();
     if(EmonURL.startsWith("http://")) EmonURL = EmonURL.substring(7);
     else if(EmonURL.startsWith("https://")){
@@ -211,7 +213,9 @@ boolean getConfig(void)
 
   else if(serverType.equals("influxdb")) {
     if(EmonStarted) EmonStop = true;
+    if (pvoutputStarted) pvoutputStop = true;
     SD.remove((char *)EmonPostLogFile.c_str());
+    SD.remove((char *)pvoutputPostLogFile.c_str());
     influxURL = Config["server"]["url"].as<String>();
     if(influxURL.startsWith("http")){
       influxURL.remove(0,4);
@@ -242,16 +246,44 @@ boolean getConfig(void)
     }
   }
 
+  // ************************************** configure pvoutput **********************************
+
+  else if (serverType.equals("pvoutput")) {
+    if (EmonStarted) EmonStop = true;
+    if (influxStarted) influxStop = true;
+    SD.remove((char *)EmonPostLogFile.c_str());
+    SD.remove((char *)influxPostLogFile.c_str());
+
+    pvoutputReportInterval = Config["server"]["reportInterval"].as<int>();
+    pvoutputApiKey = Config["server"]["apiKey"].as<String>();
+    pvoutputSystemId = Config["server"]["systemId"].as<int>();
+    pvoutputMainsChannel = Config["server"]["mainsChannel"].as<int>();
+    pvoutputSolarChannel = Config["server"]["solarChannel"].as<int>();
+    pvoutputHTTPTimeout = Config["server"]["httpTimeout"].as<unsigned int>();
+
+    // @todo verify that the mains channel has bool to enable -ve
+    // Solar channel can always figure out as it is always generating
+
+    if (!pvoutputStarted) {
+      NewService(pvoutputService);
+      pvoutputStarted = true;
+      pvoutputStop = false;
+    }
+  }
+
   else if(serverType.equals("none")){
     EmonStop = true;
     influxStop = true;
+    pvoutputStop = true;
     SD.remove((char *)influxPostLogFile.c_str());
     SD.remove((char *)EmonPostLogFile.c_str());
+    SD.remove((char *)pvoutputPostLogFile.c_str());
   }
   
   else {
     EmonStop = true;
     influxStop = true;
+    pvoutputStop = true;
     if(!serverType.equals("none")){
       msgLog("server type is not supported: ", serverType);
     }

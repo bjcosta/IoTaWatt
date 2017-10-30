@@ -84,6 +84,7 @@ String IotaLogFile = "/IotaWatt/IotaLog";
 String IotaMsgLog = "/IotaWatt/IotaMsgs.txt";
 String EmonPostLogFile = "/iotawatt/Emonlog.log";
 String influxPostLogFile = "/iotawatt/influxdb.log";
+String pvoutputPostLogFile = "/iotawatt/pvoutput.log";
 
                        
 uint8_t ADC_selectPin[2] = {pin_CS_ADC0,    // indexable reference for ADC select pins
@@ -146,6 +147,7 @@ uint32_t timeSynchInterval = 3600;           // Interval (sec) to roll NTP forwa
 uint32_t dataLogInterval = 5;                // Interval (sec) to invoke dataLog
 uint32_t EmonCMSInterval = 10;               // Interval (sec) to invoke EmonCMS
 uint32_t influxDBInterval = 10;              // Interval (sec) to invoke inflexDB 
+uint32_t pvoutputReportInterval = DEFAULT_PVOUTPUT_INTERVAL; // Interval (sec) to invoke pvoutput
 uint32_t statServiceInterval = 1;            // Interval (sec) to invoke statService
 uint32_t updaterServiceInterval = 60*60;     // Interval (sec) to check for software updates 
 
@@ -194,6 +196,19 @@ uint16_t  influxPort = 8086;
 String    influxDataBase = "test";
 int16_t   influxBulkSend = 1;
 ScriptSet* influxOutputs;      
+
+
+//********************** pvoutput configuration stuff *****************************//
+// again, need to move this stuff to a class.
+
+bool      pvoutputStarted = false;                    // set true when Service started
+bool      pvoutputStop = false;                       // set true to stop the Service
+bool      pvoutputInitialize = true;                  // Initialize or reinitialize 
+String    pvoutputApiKey = "";
+int       pvoutputSystemId = 0;
+int       pvoutputMainsChannel = 0;
+int       pvoutputSolarChannel = 0;
+extern unsigned int pvoutputHTTPTimeout = 2000;
 
       // ************************ ADC sample pairs ************************************
  
