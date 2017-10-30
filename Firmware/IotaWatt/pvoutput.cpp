@@ -1,32 +1,12 @@
 #include "IotaWatt.h"
 
-boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsumed, double powerConsumed,
+static boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsumed, double powerConsumed,
   double energyGenerated, double powerGenerated);
 
-String DateTimeToString(DateTime dt) {
-  return String(dt.year()) + "/" + String(dt.month()) + "/" + String(dt.day()) + ":" + String(dt.hour()) + ":"
-    + String(dt.minute()) + ":" + String(dt.second());
-}
+static String DateTimeToString(DateTime dt);
 
-void SetNextPOSTTime(uint32_t* UnixLastPost, uint32_t* UnixNextPost, uint32_t pvoutputReportInterval,
-  IotaLogRecord* dayStartLogRecord, IotaLogRecord* logRecord, IotaLogRecord* prevPostLogRecord) {
-  *UnixLastPost += pvoutputReportInterval;
-  *UnixNextPost += pvoutputReportInterval;
-  *prevPostLogRecord = *logRecord;
-
-  // If we move to a new day, then update dayStartLogRecord
-  DateTime lastDt(*UnixLastPost + (localTimeDiff * 3600));
-  DateTime nextDt(*UnixNextPost + (localTimeDiff * 3600));
-  if(lastDt.day() != nextDt.day()) {
-    msgLog("pvoutput:Started a new day. Previous day: " + DateTimeToString(lastDt)
-      + " new day: " + DateTimeToString(nextDt));
-    *dayStartLogRecord = *logRecord;
-  }
-  else {
-    msgLog("pvoutput:Still in same day. Previous POST: " + DateTimeToString(lastDt)
-      + " next POST: " + DateTimeToString(nextDt));
-  }
-}
+static void SetNextPOSTTime(uint32_t* UnixLastPost, uint32_t* UnixNextPost, uint32_t pvoutputReportInterval,
+  IotaLogRecord* dayStartLogRecord, IotaLogRecord* logRecord, IotaLogRecord* prevPostLogRecord);
 
 uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
   // trace T_pvoutput
@@ -59,11 +39,11 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
   if(pvoutputStop) {
     msgLog(F("pvoutput: stopped."));
     pvoutputStarted = false;
-    trace(T_pvoutput, 4);
+    trace(T_pvoutput, 1);
     pvoutputPostLog.close();
-    trace(T_pvoutput, 5);
+    trace(T_pvoutput, 2);
     SD.remove((char*)pvoutputPostLogFile.c_str());
-    trace(T_pvoutput, 6);
+    trace(T_pvoutput, 3);
     state = initialize;
     return 0;
   }
@@ -83,17 +63,22 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
 
       // We post the log to pvoutput, so wait until the log service is up and running.
       if(!iotaLog.isOpen()) {
-        msgLog(F("pvoutput: IoTaLog service is not yet running, will delay PVOutput service until it is running. Try "
-                 "again in 5 sec"));
+        trace(T_pvoutput, 4);
+        msgLog(F(
+          "pvoutput: IoTaLog service is not yet running, will delay PVOutput service until it is running. Trying again in 5 sec"));
         return UNIXtime() + 5;
       }
 
       // If logfile for this service not open then open one
-      if(!pvoutputPostLog) { pvoutputPostLog = SD.open(pvoutputPostLogFile, FILE_WRITE); }
+      if(!pvoutputPostLog) {
+        trace(T_pvoutput, 5);
+        pvoutputPostLog = SD.open(pvoutputPostLogFile, FILE_WRITE);
+      }
 
       if(pvoutputPostLog) {
         // If is a new empty log file, then create a record for the "last key"
         if(pvoutputPostLog.size() == 0) {
+          trace(T_pvoutput, 6);
           buf->data = iotaLog.lastKey();
           pvoutputPostLog.write((byte*)buf, 4);
           pvoutputPostLog.flush();
@@ -106,13 +91,15 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
         UnixLastPost = buf->data;
       }
       else {
-        // @todo Copied from influx, if failed to open log file then why do we continue and not just fail init and try
+        // @todo Copied from influx, if failed to open log file then why do we continue (and not just fail init and try
         // again later?
+        trace(T_pvoutput, 7);
         msgLog(F("pvoutput: pvoutputlog file failed to open just using most recent iota log time"));
         UnixLastPost = iotaLog.lastKey();
       }
       UnixNextPost = UnixLastPost + pvoutputReportInterval - (UnixLastPost % pvoutputReportInterval);
 
+      trace(T_pvoutput, 8);
       // For pvoutput we log energy accumulated each day, so we need to
       // read the last record seen the day before and use that as the "reference"
       // When the day ticks over, then we will update the reference
@@ -125,14 +112,20 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
 
       // Now we search backwards in the iotaLog to find the nearest key matching unixPreviousDay
       logRecord->UNIXtime = unixPreviousDay;
-      if(logRecord->UNIXtime < iotaLog.firstKey()) { logRecord->UNIXtime = iotaLog.firstKey(); }
-      if(logRecord->UNIXtime > iotaLog.lastKey()) { logRecord->UNIXtime = iotaLog.lastKey(); }
+      if(logRecord->UNIXtime < iotaLog.firstKey()) {
+        logRecord->UNIXtime = iotaLog.firstKey();
+      }
+      if(logRecord->UNIXtime > iotaLog.lastKey()) {
+        logRecord->UNIXtime = iotaLog.lastKey();
+      }
       int rkResult = 1;
       do {
+        // @todo This would be more efficient with iotaLog supporting readPrev()
         rkResult = iotaLog.readKey(logRecord);
         if(rkResult != 0) {
+          trace(T_pvoutput, 9);
           msgLog("pvoutput: WARNING: Failed to read log record " + String(logRecord->UNIXtime)
-            + " going backwards until find a key that matches, next: " + String(logRecord->UNIXtime - 1));
+            + " going backwards until a key matches, next: " + String(logRecord->UNIXtime - 1));
           logRecord->UNIXtime -= 1;
         }
       } while(rkResult != 0 && logRecord->UNIXtime > iotaLog.firstKey());
@@ -141,16 +134,22 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       *dayStartLogRecord = *logRecord;
       for(int i = 0; i < maxInputs; i++) {
         // Check for NaN
-        if(dayStartLogRecord->channel[i].accum1 != dayStartLogRecord->channel[i].accum1)
+        if(dayStartLogRecord->channel[i].accum1 != dayStartLogRecord->channel[i].accum1) {
+          trace(T_pvoutput, 10);
           dayStartLogRecord->channel[i].accum1 = 0;
+        }
       }
       // Check for NaN
-      if(dayStartLogRecord->logHours != dayStartLogRecord->logHours) dayStartLogRecord->logHours = 0;
+      if(dayStartLogRecord->logHours != dayStartLogRecord->logHours) {
+        trace(T_pvoutput, 11);
+        dayStartLogRecord->logHours = 0;
+      }
 
       // Obtain the previous post log record
       prevPostLogRecord->UNIXtime = UnixLastPost;
       rkResult = iotaLog.readKey(prevPostLogRecord);
       if(rkResult != 0) {
+        trace(T_pvoutput, 12);
         msgLog("pvoutput: WARNING: Failed to read log record " + String(prevPostLogRecord->UNIXtime)
           + " which is supposed to contain the previous post details used to detemine power used since then");
       }
@@ -172,23 +171,30 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       DateTime dtNow(UNIXtime() + (localTimeDiff * 3600));
       msgLog("pvoutput: Next post for: " + DateTimeToString(localUnixNextPostDt)
         + " comparing to previous day post at: " + DateTimeToString(dtLast) + " now is: " + DateTimeToString(dtNow));
-
+      trace(T_pvoutput, 14);
       return UnixNextPost;
     }
 
     case post: {
       // If WiFi is not connected,
       // just return without attempting to log and try again in a few seconds.
-      if(WiFi.status() != WL_CONNECTED) { return 2; }
+      if(WiFi.status() != WL_CONNECTED) {
+        trace(T_pvoutput, 15);
+        return 2;
+      }
 
       // If we are current,
       // Anticipate next posting at next regular interval and break to reschedule.
       if(iotaLog.lastKey() < UnixNextPost) {
         uint32_t now = UNIXtime();
-        if(now < UnixNextPost) { return UnixNextPost; }
+        if(now < UnixNextPost) {
+          trace(T_pvoutput, 16);
+          return UnixNextPost;
+        }
         else {
-          msgLog("pvoutput: We want to post, but iotaLog does not yet have enough data for us to be able to post it. "
-                 "last key : "
+          trace(T_pvoutput, 17);
+          msgLog(
+            "pvoutput: We want to post, but iotaLog does not yet have enough data for us to be able to post it. last key : "
             + String(iotaLog.lastKey()) + " We want to post at time : " + String(UnixNextPost)
             + " time has been reached so just waiting on iota log to have the data.Waiting for another second");
           return now + 1;
@@ -199,7 +205,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
 
       // Skip over any IoTaLog records < UnixNextPost until we find one we can use for diff against for the pvoutput
       // interval Note: Basically asserts that the logs exist, which should have been checked above.
-      trace(T_pvoutput, 1);
+      trace(T_pvoutput, 18);
       logRecord->UNIXtime = UnixLastPost;
       while(logRecord->UNIXtime < UnixNextPost) {
         if(logRecord->UNIXtime >= iotaLog.lastKey()) {
@@ -211,7 +217,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
 
       // Adjust the posting time to match the log entry time (at modulo we care about)
       reqUnixtime = logRecord->UNIXtime - (logRecord->UNIXtime % pvoutputReportInterval);
-      trace(T_pvoutput, 2);
+      trace(T_pvoutput, 19);
 
       // The measurements should be such that:
       // chan 1 : mains +ve indicates net import -ve indicates net export
@@ -219,13 +225,16 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
 
       // Find the mean voltage since last post
       int voltageChannel = -1;
-      if(pvoutputMainsChannel >= 0) { voltageChannel = inputChannel[pvoutputMainsChannel]->_vchannel; }
+      if(pvoutputMainsChannel >= 0) {
+        voltageChannel = inputChannel[pvoutputMainsChannel]->_vchannel;
+      }
       else if(pvoutputSolarChannel >= 0) {
         voltageChannel = inputChannel[pvoutputSolarChannel]->_vchannel;
       }
 
       voltage = 0;
       if(voltageChannel >= 0 && logRecord->logHours != prevPostLogRecord->logHours) {
+        trace(T_pvoutput, 20);
         voltage = (logRecord->channel[voltageChannel].accum1 - prevPostLogRecord->channel[voltageChannel].accum1);
         voltage /= (logRecord->logHours - prevPostLogRecord->logHours);
       }
@@ -246,6 +255,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       // the configuration we will just cope with it.
       energyGenerated = 0;
       if(pvoutputSolarChannel >= 0) {
+        trace(T_pvoutput, 21);
         energyGenerated
           = logRecord->channel[pvoutputSolarChannel].accum1 - dayStartLogRecord->channel[pvoutputSolarChannel].accum1;
         if(energyGenerated > 0) energyGenerated *= -1;
@@ -254,6 +264,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       // Find out how much energy we imported from the main line
       double energyImported = 0.0;
       if(pvoutputMainsChannel >= 0) {
+        trace(T_pvoutput, 22);
         energyImported
           = logRecord->channel[pvoutputMainsChannel].accum1 - dayStartLogRecord->channel[pvoutputMainsChannel].accum1;
       }
@@ -267,6 +278,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       // the mean power used in W since the last post
       powerGenerated = 0;
       if(pvoutputSolarChannel >= 0 && logRecord->logHours != prevPostLogRecord->logHours) {
+        trace(T_pvoutput, 23);
         powerGenerated
           = logRecord->channel[pvoutputSolarChannel].accum1 - prevPostLogRecord->channel[pvoutputSolarChannel].accum1;
         if(powerGenerated > 0) powerGenerated *= -1;
@@ -276,6 +288,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       // Find out how much energy we imported from the main line
       double powerImported = 0.0;
       if(pvoutputMainsChannel >= 0 && logRecord->logHours != prevPostLogRecord->logHours) {
+        trace(T_pvoutput, 24);
         powerImported
           = logRecord->channel[pvoutputMainsChannel].accum1 - prevPostLogRecord->channel[pvoutputMainsChannel].accum1;
         powerImported = powerImported / (logRecord->logHours - prevPostLogRecord->logHours);
@@ -289,12 +302,14 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
 
       // If we are exporting more than we are generating something is wrong
       if(powerImported < powerGenerated) {
+        trace(T_pvoutput, 25);
         msgLog(
           "pvoutput: PVOutput configuration is incorrect. Appears we are exporting more power than we are generating.",
           "Imported: " + String(powerImported) + ", Generated: " + String(powerGenerated));
       }
 
       if(!pvoutputSendData(reqUnixtime, voltage, energyConsumed, powerConsumed, energyGenerated, powerGenerated)) {
+        trace(T_pvoutput, 26);
         // Use resend state, the only real difference is the timeout
         state = resend;
         msgLog("pvoutput: Pushing data to PVOutput failed, trying again in 10 sec");
@@ -307,18 +322,21 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       SetNextPOSTTime(
         &UnixLastPost, &UnixNextPost, pvoutputReportInterval, dayStartLogRecord, logRecord, prevPostLogRecord);
 
-      trace(T_pvoutput, 3);
+      trace(T_pvoutput, 27);
       state = post;
       return UnixNextPost;
     }
 
     case resend: {
       msgLog(F("pvoutput: Resending pvoutput data."));
+      trace(T_pvoutput, 28);
       if(!pvoutputSendData(reqUnixtime, voltage, energyConsumed, powerConsumed, energyGenerated, powerGenerated)) {
+        trace(T_pvoutput, 29);
         msgLog("pvoutput: Pushing data to PVOutput failed, trying again in 60 sec");
         return UNIXtime() + 60;
       }
       else {
+        trace(T_pvoutput, 30);
         buf->data = UnixLastPost;
         pvoutputPostLog.write((byte*)buf, 4);
         pvoutputPostLog.flush();
@@ -340,7 +358,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
 boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsumed, double powerConsumed,
   double energyGenerated, double powerGenerated) {
   // This sends data to PVOutput using API: https://pvoutput.org/help.html#api-addstatus
-  trace(T_pvoutput, 7);
+  trace(T_pvoutput, 31);
 
   // PVOutput expects reports as positive values, our internal calculations
   // expect negative values for generation so just convert them now
@@ -354,21 +372,25 @@ boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsume
   // Now sanity check the data so we dont get PVOutput infinite POST loop
   // due to known problems
   if(energyGenerated < 0.0) {
+    trace(T_pvoutput, 32);
     msgLog("pvoutput: energyGenerated is invalid PVOutput wont accept negative values", String(energyGenerated));
     energyGenerated = 0.0;
   }
 
   if(powerGenerated < 0.0) {
+    trace(T_pvoutput, 33);
     msgLog("pvoutput: powerGenerated is invalid PVOutput wont accept negative values", String(powerGenerated));
     powerGenerated = 0.0;
   }
 
   if(energyConsumed < 0.0) {
+    trace(T_pvoutput, 34);
     msgLog("pvoutput: energyConsumed is invalid PVOutput wont accept negative values", String(energyConsumed));
     energyConsumed = 0.0;
   }
 
   if(powerConsumed < 0.0) {
+    trace(T_pvoutput, 35);
     msgLog("pvoutput: powerConsumed is invalid PVOutput wont accept negative values", String(powerConsumed));
     powerConsumed = 0.0;
   }
@@ -396,15 +418,47 @@ boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsume
   String response = http.getString();
   http.end();
   if(httpCode != HTTP_CODE_OK && httpCode != 204) {
+    trace(T_pvoutput, 36);
     String code = String(httpCode);
-    if(httpCode < 0) { code = http.errorToString(httpCode); }
+    if(httpCode < 0) {
+      code = http.errorToString(httpCode);
+    }
 
     msgLog("pvoutput: POST FAILED code: " + String(httpCode) + " message: " + code + " response: " + response);
     return false;
   }
   else {
+    trace(T_pvoutput, 37);
     msgLog("pvoutput: POST success code: " + String(httpCode) + " response: " + response);
   }
 
   return true;
+}
+
+String DateTimeToString(DateTime dt) {
+  return String(dt.year()) + "/" + String(dt.month()) + "/" + String(dt.day()) + ":" + String(dt.hour()) + ":"
+    + String(dt.minute()) + ":" + String(dt.second());
+}
+
+void SetNextPOSTTime(uint32_t* UnixLastPost, uint32_t* UnixNextPost, uint32_t pvoutputReportInterval,
+  IotaLogRecord* dayStartLogRecord, IotaLogRecord* logRecord, IotaLogRecord* prevPostLogRecord) {
+
+  *UnixLastPost += pvoutputReportInterval;
+  *UnixNextPost += pvoutputReportInterval;
+  *prevPostLogRecord = *logRecord;
+
+  // If we move to a new day, then update dayStartLogRecord
+  DateTime lastDt(*UnixLastPost + (localTimeDiff * 3600));
+  DateTime nextDt(*UnixNextPost + (localTimeDiff * 3600));
+  if(lastDt.day() != nextDt.day() || lastDt.month() != nextDt.month() || lastDt.year() != nextDt.year()) {
+    trace(T_pvoutput, 38);
+    msgLog("pvoutput: Started a new day for log accumulation. Previous day: " + DateTimeToString(lastDt)
+      + " new day: " + DateTimeToString(nextDt));
+    *dayStartLogRecord = *logRecord;
+  }
+  else {
+    trace(T_pvoutput, 39);
+    msgLog("pvoutput: Still in same day for log accumulation. Previous POST: " + DateTimeToString(lastDt)
+      + " next POST: " + DateTimeToString(nextDt));
+  }
 }
