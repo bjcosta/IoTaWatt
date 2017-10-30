@@ -1051,7 +1051,7 @@ function burdenSave(){
  * ******************************************************************************************/
 
 function buildWebServer(){
-  var servers = ["None", "Emoncms", "InfluxDB"];
+  var servers = ["None", "Emoncms", "InfluxDB", "PVOutput"];
   document.getElementById("serverOutputs").innerHTML = "";
   document.getElementById("serverOutputsHeader").innerHTML = "";
   currentBodyPush("divWebServer");
@@ -1072,6 +1072,9 @@ function buildWebServer(){
   }
   else if(config.server.type.toLowerCase() == "influxdb"){
     buildInfluxdb();
+  }
+  else if(config.server.type.toLowerCase() == "pvoutput"){
+    buildPVOutput();
   }
   else if(config.server.type.toLowerCase() == "none"){
     document.getElementById("serverSave").style.display = "inline";
@@ -1100,6 +1103,16 @@ function newServer(obj){
                       url:"",
                       "database":"",
                       "outputs":[]
+                      };
+  }
+  else if(obj.value.toLowerCase() == "pvoutput"){
+    config.server =  {type:"pvoutput",
+                      reportInterval:300,
+                      "apiKey":"",
+                      "systemId":"",
+                      "mainsChannel":-1,
+                      "solarChannel":-1,
+                      "httpTimeout":2000
                       };
   }
   buildWebServer();
@@ -1285,6 +1298,77 @@ function checkInfluxdb(){
   if(config.server.outputs.length == 0) complete = false;
   document.getElementById("serverSave").style.display = complete ? "inline" : "none";
 }
+
+/***********************************************************************************************
+ *                                Configure PVOutput
+ * ********************************************************************************************/
+function buildPVOutput(){
+  var serverTable = document.getElementById("serverTable");
+  
+  var postInput =   addTableRow(serverTable, "Report Interval(sec): ", "reportInterval", "input", 3);
+  postInput.value = Number(config.server.reportInterval);
+  postInput.setAttribute("onchange","config.server.reportInterval = Number(this.value); checkPVOutput();");
+  postInput.setAttribute("style","width: 40px;");
+  postInput.type = "number";
+  postInput.setAttribute("min","300");
+  postInput.setAttribute("max","3600");
+  postInput.setAttribute("step","5");
+
+  var keyInput = addTableRow(serverTable, "API Key:", "apiKey", "input", 40);
+  keyInput.value = config.server.apiKey;
+  keyInput.setAttribute("oninput","config.server.apiKey = this.value; checkPVOutput();");
+  keyInput.setAttribute("size","40");
+  keyInput.pattern = "[0-9a-f]{40}";
+  keyInput.title = "read/write key - 40 hexadecimal digits";
+
+  var systemInput =   addTableRow(serverTable, "System ID: ", "systemId", "input", 3);
+  systemInput.value = Number(config.server.systemId);
+  systemInput.setAttribute("onchange","config.server.systemId = Number(this.value); checkPVOutput();");
+  systemInput.setAttribute("style","width: 40px;");
+  systemInput.type = "number";
+  systemInput.setAttribute("min","0");
+  systemInput.setAttribute("max","100000");
+  systemInput.setAttribute("step","1");
+
+  var systemInput =   addTableRow(serverTable, "Mains Channel (-1 to disable): ", "mainsChannel", "input", 3);
+  systemInput.value = Number(config.server.mainsChannel);
+  systemInput.setAttribute("onchange","config.server.mainsChannel = Number(this.value); checkPVOutput();");
+  systemInput.setAttribute("style","width: 40px;");
+  systemInput.type = "number";
+  systemInput.setAttribute("min","-1");
+  systemInput.setAttribute("max","16");
+  systemInput.setAttribute("step","1");
+
+  var systemInput =   addTableRow(serverTable, "Solar Channel (-1 to disable): ", "solarChannel", "input", 3);
+  systemInput.value = Number(config.server.solarChannel);
+  systemInput.setAttribute("onchange","config.server.solarChannel = Number(this.value); checkPVOutput();");
+  systemInput.setAttribute("style","width: 40px;");
+  systemInput.type = "number";
+  systemInput.setAttribute("min","-1");
+  systemInput.setAttribute("max","16");
+  systemInput.setAttribute("step","1");
+
+  var systemInput =   addTableRow(serverTable, "HTTP Timeout (msec): ", "httpTimeout", "input", 3);
+  systemInput.value = Number(config.server.httpTimeout);
+  systemInput.setAttribute("onchange","config.server.httpTimeout = Number(this.value); checkPVOutput();");
+  systemInput.setAttribute("style","width: 40px;");
+  systemInput.type = "number";
+  systemInput.setAttribute("min","0");
+  systemInput.setAttribute("max","100000");
+  systemInput.setAttribute("step","1");
+}
+
+function checkPVOutput(){
+  var complete = true;
+  if( ! validateInput("reportInterval")) complete = false;
+  if( ! validateInput("apiKey")) complete = false;
+  if( ! validateInput("systemId")) complete = false;
+  if( ! validateInput("mainsChannel")) complete = false;
+  if( ! validateInput("solarChannel")) complete = false;
+  if( ! validateInput("httpTimeout")) complete = false;
+  document.getElementById("serverSave").style.display = complete ? "inline" : "none";
+}
+
 
 /***********************************************************************************************
  *                        Setup and run status display
