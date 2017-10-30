@@ -83,6 +83,7 @@ extern String IotaLogFile;
 extern String IotaMsgLog;
 extern String EmonPostLogFile;
 extern String influxPostLogFile;
+extern String pvoutputPostLogFile;
 extern uint16_t deviceVersion;
 
         // Define the hardware pins
@@ -118,6 +119,7 @@ extern uint8_t ADC_selectPin[2];            // indexable reference for ADC selec
 #define T_POWER 90          // Sample Power
 #define T_WEB 100           // (30)Web server handlers
 #define T_CONFIG 130        //  Get Config
+#define T_pvoutput 140      // pvoutput
 
       // ADC descriptors
 
@@ -192,6 +194,7 @@ extern uint32_t EmonCMSInterval;               // Interval (sec) to invoke EmonC
 extern uint32_t influxDBInterval;              // Interval (sec) to invoke inflexDB
 extern uint32_t statServiceInterval;           // Interval (sec) to invoke statService
 extern uint32_t updaterServiceInterval;     // Interval (sec) to check for software updates
+extern uint32_t pvoutputReportInterval;        // Interval (sec) to invoke pvoutput
 
 extern bool     hasRTC;
 extern bool     RTCrunning;
@@ -239,6 +242,20 @@ extern String   influxDataBase;
 extern int16_t  influxBulkSend;
 extern ScriptSet* influxOutputs;
 
+
+
+//********************** pvoutput configuration stuff *****************************//
+// again, need to move this stuff to a class.
+#define DEFAULT_PVOUTPUT_INTERVAL (5*60)
+extern bool     pvoutputStarted;                    // set true when Service started
+extern bool     pvoutputStop;                       // set true to stop the Service
+extern bool     pvoutputInitialize;                 // Initialize or reinitialize
+extern String   pvoutputApiKey;
+extern int      pvoutputSystemId;
+extern int      pvoutputMainsChannel;
+extern int      pvoutputSolarChannel;
+extern unsigned int pvoutputHTTPTimeout;
+
       // ************************ ADC sample pairs ************************************
 
 #define MAX_SAMPLES 1000
@@ -258,6 +275,7 @@ uint32_t  dataLog(struct serviceBlock*);
 uint32_t  statService(struct serviceBlock*);
 uint32_t  EmonService(struct serviceBlock*);
 uint32_t  influxService(struct serviceBlock*);
+uint32_t  pvoutputService(struct serviceBlock*);
 uint32_t  timeSync(struct serviceBlock*);
 uint32_t  updater(struct serviceBlock*);
 uint32_t  WiFiService(struct serviceBlock*);
