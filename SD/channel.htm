@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en-US">
+	<head>
+		<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>IoTaWatt Channel Plot</title>
+		<link rel="shortcut icon" href="https://emoncms.org/Theme/basic/favicon.png" />
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black">
+		<link rel="apple-touch-startup-image" href="https://emoncms.org/Theme/basic/ios_load.png">
+		<link rel="apple-touch-icon" href="https://emoncms.org/Theme/basic/logo_normal.png">
+		<link href="https://emoncms.org/Lib/bootstrap/css/bootstrap-combined.min.css" rel="stylesheet">
+		<link href="https://emoncms.org/Theme/basic/emon.css" rel="stylesheet">
+		<script type="text/javascript" src="https://emoncms.org/Lib/jquery-1.11.3.min.js"></script>
+		<script type="text/javascript" src="https://rawgit.com/evanplaice/jquery-csv/0.8.3/src/jquery.csv.min.js"></script>
+		<!--[if IE]><script language="javascript" type="text/javascript" src="https://emoncms.org/Lib/flot/excanvas.min.js"></script><![endif]-->
+		<script language="javascript" type="text/javascript" src="https://cdn.rawgit.com/flot/flot/v0.8.3/jquery.flot.js"></script>
+		<script type="text/javascript" src="https://cdn.rawgit.com/watmough/jsFFT/a15f8b7539c2b26b771b273ead55df6a02597dd3/jsFFT.js"></script>
+		<script language="javascript" type="text/javascript" src="https://emoncms.org/Modules/graph/vis.helper.js"></script>
+		<link rel="stylesheet" type="text/css" href="https://cdn.rawgit.com/bjcosta/IoTaWatt/befd5cf673e61076f37444af1992015b4d334a77/SD/cnfstyle.css">
+		<script type="text/javascript" src="channel.js"></script>
+		<style>
+.graph-placeholder {
+	width: 100%;
+	height: 100%;
+	font-size: 14px;
+	line-height: 1.2em;
+}
+		</style>
+	</head>
+	<body>
+		<div id="header">
+			<h2>IoTaWatt Channel Plot : Channel 1</h2>
+		</div>
+		<div id="content">
+			<div>
+				<button id="refresh" class="btn" onclick="refreshSamples()">Refresh</button>
+				<input type="checkbox" onclick="autoRefreshSamples(this);" id="autoRefresh">Auto Refresh</input>
+			</div>
+			
+			<div id="channelSelection">
+				<select id="channel" onchange="refreshChannel()"></select>
+			</div>
+			<hr/>
+			
+			<div style="width:100%; height:300px;">
+				<h3>Voltage</h3>
+				<div id="voltage_placeholder" class="graph-placeholder"></div>
+			</div>
+			<hr/>
+
+			<div style="width:100%; height:300px;">
+				<h3>Current</h3>
+				<div id="current_placeholder" class="graph-placeholder"></div>
+			</div>
+			<hr/>
+
+			<div style="width:100%; height:300px;">
+				<h3>Power</h3>
+				<div id="power_placeholder" class="graph-placeholder"></div>
+			</div>
+			<hr/>
+
+			<div style="width:100%; height:300px;">
+				<h3>Voltage FFT</h3>
+				<div id="voltage_fft_placeholder" class="graph-placeholder"></div>
+			</div>
+			<hr/>
+
+			<div style="width:100%; height:300px;">
+				<h3>Current FFT</h3>
+				<div id="current_fft_placeholder" class="graph-placeholder"></div>
+			</div>
+			<hr/>
+
+			<div style="width:100%; height:300px;">
+				<h3>Power FFT</h3>
+				<div id="power_fft_placeholder" class="graph-placeholder"></div>
+			</div>
+			<hr/>
+		</div>
+		
+		<script type="text/javascript">
+			initializePage();
+		</script>
+	</body>
+</html>
