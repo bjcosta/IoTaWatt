@@ -394,6 +394,41 @@ void handleCommand(){
     server.send(200, "text/plain", response);
     return; 
   }
+  if (server.hasArg("channel")) {
+    // @todo No bounds checking on any channel int inputs
+    trace(T_WEB,21);
+    uint16_t i = server.arg("channel").toInt();
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& root = jsonBuffer.createObject();
+    root.set("type", (int)inputChannel[i]->_type);
+    root.set("name", inputChannel[i]->_name);
+    root.set("model", inputChannel[i]->_model);
+    root.set("channel", inputChannel[i]->_channel);
+    root.set("ADCbits", inputChannel[i]->_ADCbits);
+    root.set("addr", inputChannel[i]->_addr);
+    root.set("aRef", inputChannel[i]->_aRef);
+    root.set("offset", inputChannel[i]->_offset);
+    root.set("vchannel", inputChannel[i]->_vchannel);
+    root.set("burden", inputChannel[i]->_burden);
+    root.set("calibration", inputChannel[i]->_calibration);
+    root.set("phase", inputChannel[i]->_phase);
+    root.set("active", inputChannel[i]->_active);
+    root.set("reversed", inputChannel[i]->_reversed);
+    root.set("signed", inputChannel[i]->_signed);
+    root.set("value1", inputChannel[i]->dataBucket.value1);
+    root.set("value2", inputChannel[i]->dataBucket.value2);
+    root.set("accum1", inputChannel[i]->dataBucket.accum1);
+    root.set("accum2", inputChannel[i]->dataBucket.accum2);
+    root.set("timeThen", inputChannel[i]->dataBucket.timeThen);
+    root.set("vadj3", Vadj_3);
+    root.set("adcrange", ADC_RANGE);
+    root.set("aRefValue", getAref(i));
+
+    String response = "";
+    root.printTo(response);
+    server.send(200, "text/json", response);  
+    return; 
+  }
   if(server.hasArg("disconnect")) {
     trace(T_WEB,6); 
     server.send(200, "text/plain", "ok");
