@@ -18,10 +18,17 @@ struct PVOutputRecord {
   double voltage = 0.0;
 };
 
-static String DateTimeToString(DateTime dt);
+/** Stores only the parts of IotaLogRecord that we care about for the PVOutput calculations to reduce memory usage
+ */
+struct PartialIotaLogRecord {
+  uint32_t UNIXtime = 0;
+  double logHours = 0.0;
+  double voltage_accum = 0.0;
+  double mains_accum = 0.0;
+  double solar_accum = 0.0;
+};
 
-static void startNextPostInterval(uint32_t* nextPostTime, uint32_t pvoutputReportInterval,
-  IotaLogRecord* dayStartLogRecord, IotaLogRecord* logRecord, IotaLogRecord* prevPostLogRecord);
+static String DateTimeToString(DateTime dt);
 
 static void readKeyAtOrBefore(IotaLog& iotaLog, IotaLogRecord* record, uint32_t when);
 
@@ -31,18 +38,23 @@ static uint32_t UTCToLocalTime(uint32_t utc);
 
 static uint32_t LocalToUTCTime(uint32_t local);
 
-static PVOutputRecord CreatePVOutputRecord(
-  uint32_t postTime, IotaLogRecord* logRecord, IotaLogRecord* prevPostLogRecord, IotaLogRecord* dayStartLogRecord);
+static void startNextPostInterval(uint32_t* nextPostTime, uint32_t pvoutputReportInterval,
+  PartialIotaLogRecord* dayStartLogRecord, IotaLogRecord* logRecord, PartialIotaLogRecord* prevPostLogRecord);
+
+static PVOutputRecord CreatePVOutputRecord(uint32_t postTime, IotaLogRecord* logRecord,
+  PartialIotaLogRecord* prevPostLogRecord, PartialIotaLogRecord* dayStartLogRecord);
 
 static boolean pvoutputSendData(const PVOutputRecord& pvoutputRecord);
+
+static PartialIotaLogRecord IotaToPartialRecord(IotaLogRecord* logRecord);
 
 uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
   // trace T_pvoutput
   enum states { initialize, post, resend };
   static states state = initialize;
   static IotaLogRecord* logRecord = new IotaLogRecord;
-  static IotaLogRecord* prevPostLogRecord = new IotaLogRecord;
-  static IotaLogRecord* dayStartLogRecord = new IotaLogRecord;
+  static PartialIotaLogRecord* prevPostLogRecord = new PartialIotaLogRecord;
+  static PartialIotaLogRecord* dayStartLogRecord = new PartialIotaLogRecord;
   static File pvoutputPostLog;
   static uint32_t nextPostTime = UNIXtime();
   static PVOutputRecord pvoutputRecord;
@@ -124,7 +136,8 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       }
 
       // Obtain the record used for for prevPostTime
-      readKeyAtOrBefore(iotaLog, prevPostLogRecord, prevPostTime);
+      readKeyAtOrBefore(iotaLog, logRecord, prevPostTime);
+      *prevPostLogRecord = IotaToPartialRecord(logRecord);
       msgLog("pvoutput: Using previous iota log record with time: " + String(prevPostLogRecord->UNIXtime)
         + " as previous record for expected prev time: " + String(prevPostTime));
 
@@ -142,7 +155,8 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       // read the last record seen the day before and use that as the reference
       // for accumulated energy this day.
       uint32_t unixPreviousDay = getPreviousDay(nextPostTime);
-      readKeyAtOrBefore(iotaLog, dayStartLogRecord, unixPreviousDay);
+      readKeyAtOrBefore(iotaLog, logRecord, unixPreviousDay);
+      *dayStartLogRecord = IotaToPartialRecord(logRecord);
       msgLog("pvoutput: Using end of previous day iota log record with time: " + String(dayStartLogRecord->UNIXtime)
         + " as previous day record for expected prev day time: " + String(unixPreviousDay));
 
@@ -202,7 +216,9 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
       //
       // Skip over any IoTaLog records until we find one we want to report to pvoutput
       trace(T_pvoutput, 18);
-      *logRecord = *prevPostLogRecord;
+      logRecord->UNIXtime = prevPostLogRecord->UNIXtime;
+      iotaLog.readKey(logRecord);
+
       uint32_t prevKey = logRecord->UNIXtime;
       while(logRecord->UNIXtime < nextPostTime) {
 
@@ -332,12 +348,12 @@ String DateTimeToString(DateTime dt) {
     + String(dt.minute()) + ":" + String(dt.second());
 }
 
-void startNextPostInterval(uint32_t* nextPostTime, uint32_t pvoutputReportInterval, IotaLogRecord* dayStartLogRecord,
-  IotaLogRecord* logRecord, IotaLogRecord* prevPostLogRecord) {
+void startNextPostInterval(uint32_t* nextPostTime, uint32_t pvoutputReportInterval,
+  PartialIotaLogRecord* dayStartLogRecord, IotaLogRecord* logRecord, PartialIotaLogRecord* prevPostLogRecord) {
 
   // Update the previous record to point to the one just posted (irrespective of if there is a time jump for next
   // because of a gap in the iota log)
-  *prevPostLogRecord = *logRecord;
+  *prevPostLogRecord = IotaToPartialRecord(logRecord);
 
   // Find the next time to post
   *nextPostTime += pvoutputReportInterval;
@@ -352,7 +368,6 @@ void startNextPostInterval(uint32_t* nextPostTime, uint32_t pvoutputReportInterv
   if(rkResult == 0) {
     if(logRecord->UNIXtime > *nextPostTime) {
       uint32_t newPostTime = logRecord->UNIXtime - (logRecord->UNIXtime % pvoutputReportInterval);
-      ;
       msgLog("pvoutput: Big jump in log record keys. Expecting next as: " + String(*nextPostTime)
         + " but the next one in the iota log is: " + String(logRecord->UNIXtime)
         + " setting next to: " + String(newPostTime));
@@ -432,12 +447,13 @@ uint32_t UTCToLocalTime(uint32_t utc) { return utc + (localTimeDiff * 3600); }
 
 uint32_t LocalToUTCTime(uint32_t local) { return local - (localTimeDiff * 3600); }
 
-PVOutputRecord CreatePVOutputRecord(
-  uint32_t postTime, IotaLogRecord* logRecord, IotaLogRecord* prevPostLogRecord, IotaLogRecord* dayStartLogRecord) {
+PVOutputRecord CreatePVOutputRecord(uint32_t postTime, IotaLogRecord* logRecord,
+  PartialIotaLogRecord* prevPostLogRecord, PartialIotaLogRecord* dayStartLogRecord) {
+
   PVOutputRecord ret;
+  PartialIotaLogRecord current = IotaToPartialRecord(logRecord);
 
   // Adjust the posting time to match the log entry time (at modulo we care about)
-  // reqUnixtime = logRecord->UNIXtime - (logRecord->UNIXtime % pvoutputReportInterval);
   ret.reqUnixtime = postTime - (postTime % pvoutputReportInterval);
   msgLog("pvoutput: postTime: " + String(postTime) + ", req: " + String(ret.reqUnixtime));
   assert(ret.reqUnixtime == postTime);
@@ -447,20 +463,11 @@ PVOutputRecord CreatePVOutputRecord(
   // chan 1 : mains +ve indicates net import -ve indicates net export
   // chan 2 : solar -ve indicates generation +ve should never really happen would indicate solar panels using power
 
-  // Find the mean voltage since last post
-  int voltageChannel = -1;
-  if(pvoutputMainsChannel >= 0) {
-    voltageChannel = inputChannel[pvoutputMainsChannel]->_vchannel;
-  }
-  else if(pvoutputSolarChannel >= 0) {
-    voltageChannel = inputChannel[pvoutputSolarChannel]->_vchannel;
-  }
-
   ret.voltage = 0;
-  if(voltageChannel >= 0 && logRecord->logHours != prevPostLogRecord->logHours) {
+  if(current.logHours != prevPostLogRecord->logHours) {
     trace(T_pvoutput, 20);
-    ret.voltage = (logRecord->channel[voltageChannel].accum1 - prevPostLogRecord->channel[voltageChannel].accum1);
-    ret.voltage /= (logRecord->logHours - prevPostLogRecord->logHours);
+    ret.voltage = (current.voltage_accum - prevPostLogRecord->voltage_accum);
+    ret.voltage /= (current.logHours - prevPostLogRecord->logHours);
   }
 
   // Energy is calculated since begining of the day
@@ -477,21 +484,11 @@ PVOutputRecord CreatePVOutputRecord(
   // will enforce it has a negative value in the case the CT has been
   // installed in reverse. This will not be considered a failure in
   // the configuration we will just cope with it.
-  ret.energyGenerated = 0;
-  if(pvoutputSolarChannel >= 0) {
-    trace(T_pvoutput, 21);
-    ret.energyGenerated
-      = logRecord->channel[pvoutputSolarChannel].accum1 - dayStartLogRecord->channel[pvoutputSolarChannel].accum1;
-    if(ret.energyGenerated > 0) ret.energyGenerated *= -1;
-  }
+  ret.energyGenerated = current.solar_accum - dayStartLogRecord->solar_accum;
+  if(ret.energyGenerated > 0) ret.energyGenerated *= -1;
 
   // Find out how much energy we imported from the main line
-  double energyImported = 0.0;
-  if(pvoutputMainsChannel >= 0) {
-    trace(T_pvoutput, 22);
-    energyImported
-      = logRecord->channel[pvoutputMainsChannel].accum1 - dayStartLogRecord->channel[pvoutputMainsChannel].accum1;
-  }
+  double energyImported = current.mains_accum - dayStartLogRecord->mains_accum;
 
   // Example:
   // generated = -5kWh
@@ -501,21 +498,19 @@ PVOutputRecord CreatePVOutputRecord(
 
   // the mean power used in W since the last post
   ret.powerGenerated = 0;
-  if(pvoutputSolarChannel >= 0 && logRecord->logHours != prevPostLogRecord->logHours) {
+  if(current.logHours != prevPostLogRecord->logHours) {
     trace(T_pvoutput, 23);
-    ret.powerGenerated
-      = logRecord->channel[pvoutputSolarChannel].accum1 - prevPostLogRecord->channel[pvoutputSolarChannel].accum1;
+    ret.powerGenerated = current.solar_accum - prevPostLogRecord->solar_accum;
     if(ret.powerGenerated > 0) ret.powerGenerated *= -1;
-    ret.powerGenerated = ret.powerGenerated / (logRecord->logHours - prevPostLogRecord->logHours);
+    ret.powerGenerated = ret.powerGenerated / (current.logHours - prevPostLogRecord->logHours);
   }
 
   // Find out how much energy we imported from the main line
   double powerImported = 0.0;
-  if(pvoutputMainsChannel >= 0 && logRecord->logHours != prevPostLogRecord->logHours) {
+  if(pvoutputMainsChannel >= 0 && current.logHours != prevPostLogRecord->logHours) {
     trace(T_pvoutput, 24);
-    powerImported
-      = logRecord->channel[pvoutputMainsChannel].accum1 - prevPostLogRecord->channel[pvoutputMainsChannel].accum1;
-    powerImported = powerImported / (logRecord->logHours - prevPostLogRecord->logHours);
+    powerImported = current.mains_accum - prevPostLogRecord->mains_accum;
+    powerImported = powerImported / (current.logHours - prevPostLogRecord->logHours);
   }
 
   // Example:
@@ -560,6 +555,50 @@ PVOutputRecord CreatePVOutputRecord(
     trace(T_pvoutput, 35);
     msgLog("pvoutput: powerConsumed is invalid PVOutput wont accept negative values", String(ret.powerConsumed));
     ret.powerConsumed = 0.0;
+  }
+
+  return ret;
+}
+
+PartialIotaLogRecord IotaToPartialRecord(IotaLogRecord* logRecord) {
+  PartialIotaLogRecord ret;
+  ret.logHours = logRecord->logHours;
+  ret.UNIXtime = logRecord->UNIXtime;
+
+  // Figure out which channel stores the voltage reference
+  int voltageChannel = -1;
+  if(pvoutputMainsChannel >= 0) {
+    voltageChannel = inputChannel[pvoutputMainsChannel]->_vchannel;
+  }
+  else if(pvoutputSolarChannel >= 0) {
+    voltageChannel = inputChannel[pvoutputSolarChannel]->_vchannel;
+  }
+
+  if(voltageChannel >= 0) {
+    ret.voltage_accum = logRecord->channel[voltageChannel].accum1;
+
+    // There seems to be a pattern of needing to handle NaN in IoTaWatt, so do so now
+    if(ret.voltage_accum != ret.voltage_accum) {
+      ret.voltage_accum = 0.0;
+    }
+  }
+
+  if(pvoutputSolarChannel >= 0) {
+    ret.solar_accum = logRecord->channel[pvoutputSolarChannel].accum1;
+
+    // There seems to be a pattern of needing to handle NaN in IoTaWatt, so do so now
+    if(ret.solar_accum != ret.solar_accum) {
+      ret.solar_accum = 0.0;
+    }
+  }
+
+  if(pvoutputMainsChannel >= 0) {
+    ret.mains_accum = logRecord->channel[pvoutputMainsChannel].accum1;
+
+    // There seems to be a pattern of needing to handle NaN in IoTaWatt, so do so now
+    if(ret.mains_accum != ret.mains_accum) {
+      ret.mains_accum = 0.0;
+    }
   }
 
   return ret;
