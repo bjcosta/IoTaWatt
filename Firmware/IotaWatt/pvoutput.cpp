@@ -365,6 +365,14 @@ boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsume
   energyGenerated *= -1;
   powerGenerated *= -1;
 
+  // PVOutput requires data no older than 14 days, will only do 13 days
+  uint32_t thirteenDaysAgo = UNIXtime() - (13U * 24U * 60U * 60U);
+  
+  if (unixTime < thirteenDaysAgo) {
+    msgLog("pvoutput: Post for old data: " + String(unixTime) + " and PVOutput only accepts data upto 14 days old (we are limiting to 13 days): " + String(thirteenDaysAgo));
+    return true;
+  }
+
   // PVOutput requires localized time
   uint32_t localUnixTime = unixTime + (localTimeDiff * 3600);
   DateTime dt(localUnixTime);
@@ -395,8 +403,16 @@ boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsume
     powerConsumed = 0.0;
   }
 
-  String path = String("/service/r2/addstatus.jsp") + "?d=" + String(dt.year()) + String(dt.month()) + String(dt.day())
-    + "&t=" + String(dt.hour()) + ":" + String(dt.minute()) + "&v1=" + String(energyGenerated)
+  char dateStr[10];
+  snprintf(dateStr, sizeof(dateStr), "%04u%02u%02u", dt.year(), dt.month(), dt.day());
+  dateStr[sizeof(dateStr) - 1] = 0;
+
+  char timeStr[10];
+  snprintf(timeStr, sizeof(timeStr), "%02u:%02u", dt.hour(), dt.minute());
+  timeStr[sizeof(timeStr) - 1] = 0;
+
+  String path = String("/service/r2/addstatus.jsp") + "?d=" + String(dateStr)
+    + "&t=" + String(timeStr) + "&v1=" + String(energyGenerated)
     + "&v2=" + String(powerGenerated) + "&v3=" + String(energyConsumed) + "&v4="
     + String(powerConsumed)
     //+ "&v5=" + String(temperature)
@@ -436,8 +452,11 @@ boolean pvoutputSendData(uint32_t unixTime, double voltage, double energyConsume
 }
 
 String DateTimeToString(DateTime dt) {
-  return String(dt.year()) + "/" + String(dt.month()) + "/" + String(dt.day()) + ":" + String(dt.hour()) + ":"
-    + String(dt.minute()) + ":" + String(dt.second());
+  char dateStr[23];
+  snprintf(dateStr, sizeof(dateStr), "%04u/%02u/%02u-%02u:%02u:%02u", dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute(), dt.second());
+  dateStr[sizeof(dateStr) - 1] = 0;
+
+  return String(dateStr);
 }
 
 void SetNextPOSTTime(uint32_t* UnixLastPost, uint32_t* UnixNextPost, uint32_t pvoutputReportInterval,
