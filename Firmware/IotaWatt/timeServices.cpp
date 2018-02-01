@@ -18,7 +18,7 @@
   uint32_t getNTPtime() {
     if(WiFi.isConnected()) {
       WiFiUDP udp;
-      const char* ntpServerName = "time.nist.gov";
+      const char* ntpServerName = "pool.ntp.org";
       const int NTP_PACKET_SIZE = 48;
       unsigned int localPort = 2390;
       byte packetBuffer[NTP_PACKET_SIZE] = {0xE3, 0, 6, 0xEC, 0,0,0,0,0,0,0,0, 49, 0x4E, 49, 52};
