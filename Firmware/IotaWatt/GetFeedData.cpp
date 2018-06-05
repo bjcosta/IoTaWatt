@@ -14,32 +14,30 @@
  * 
  **************************************************************************************************/
 
-uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
+uint32_t getFeedData(struct serviceBlock* _serviceBlock){
   // trace T_GFD
   enum   states {Initialize, Setup, process};
  
   static states state = Initialize;
-  static IotaLogRecord* logRecord = new IotaLogRecord;
-  static IotaLogRecord* lastRecord = new IotaLogRecord;
-  static IotaLogRecord* swapRecord;
-  static char* bufr = nullptr;
+  static IotaLogRecord* logRecord;
+  static IotaLogRecord* lastRecord;
+  static char*    bufr;
+  static double   elapsedHours;
   static uint32_t bufrSize = 0;
   static uint32_t bufrPos = 0;
-  static double elapsedHours = 0;
   static uint32_t startUnixTime;
   static uint32_t endUnixTime;
   static uint32_t intervalSeconds;
+  static bool     modeRequest;
   static uint32_t UnixTime;
-  static int voltageChannel = 0;
-  static boolean Kwh = false;
-  static String replyData = "";
-    
+  static String   replyData = "";
+  
   struct req {
     req* next;
     int channel;
-    int queryType;
+    char queryType;
     Script* output;
-    req(){next=nullptr; channel=0; queryType=0; output=nullptr;};
+    req(){next=nullptr; channel=0; queryType=' '; output=nullptr;};
     ~req(){delete next;};
   } static reqRoot;
      
@@ -56,12 +54,23 @@ uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
       
       startUnixTime = server.arg("start").substring(0,10).toInt();
       endUnixTime = server.arg("end").substring(0,10).toInt();
-      intervalSeconds = server.arg("interval").toInt();
+      if(server.hasArg("interval")){
+        intervalSeconds = server.arg("interval").toInt();
+        modeRequest = false;;
+      }
+      else if(server.hasArg("mode")){
+        modeRequest = true;
+        if(server.arg("mode")== "daily") intervalSeconds = 86400;
+        else if(server.arg("mode") == "weekly") intervalSeconds = 86400 * 7;
+        else if(server.arg("mode") == "monthly") intervalSeconds = 86400 * 30;
+        else if(server.arg("mode") == "yearly") intervalSeconds = 86400 * 365;
+      }
       if((startUnixTime % 5) ||
          (endUnixTime % 5) ||
          (intervalSeconds % 5) ||
          (intervalSeconds <= 0) ||
-         (endUnixTime < startUnixTime)){
+         (endUnixTime < startUnixTime) ||
+         ((endUnixTime - startUnixTime) / intervalSeconds > 2000)) {
         server.send(400, "text/plain", "Invalid request");
         state = Setup;
         serverAvailable = true;
@@ -83,29 +92,44 @@ uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
       while(i < idParm.length()){
         reqPtr->next = new req;
         reqPtr = reqPtr->next;
-        int id = idParm.substring(i,idParm.indexOf(',',i)).toInt();
+        String id = idParm.substring(i,idParm.indexOf(',',i));
+        String name = id.substring(2);
         i = idParm.indexOf(',',i) + 1;
-        reqPtr->channel = id / 10;
-        reqPtr->queryType = id % 10;
-        if(reqPtr->channel >= 100){
-          Script* script = outputs->first();
-          int index = reqPtr->channel - 100;
-          while(index){
-            if(script)script = script->next();
-            index--;
+        if(id.charAt(0) == 'I'){
+          for(int j=0; j<maxInputs; j++){
+            if(inputChannel[j]->isActive() &&
+               name.equals(inputChannel[j]->_name)){
+               reqPtr->channel = inputChannel[j]->_channel;
+               reqPtr->output = nullptr;
+               reqPtr->queryType = id.charAt(1);
+               break;
+            }
           }
-          reqPtr->output = script;
+        }
+        else if(id.charAt(0) == 'O'){
+          Script* script = outputs->first();
+          while(script){
+            if(name.equals(script->name())){
+              reqPtr->channel = -1;
+              reqPtr->output = script;
+              reqPtr->queryType = id.charAt(1);
+              break;
+            } 
+            script = script->next(); 
+          }  
         }
       }
           
-      
+      logRecord = new IotaLogRecord;
+      lastRecord = new IotaLogRecord;
      
-      if(startUnixTime >= iotaLog.firstKey()){   
+      if(startUnixTime >= histLog.firstKey()){   
         lastRecord->UNIXtime = startUnixTime - intervalSeconds;
       } else {
-        lastRecord->UNIXtime = iotaLog.firstKey();
+        lastRecord->UNIXtime = histLog.firstKey();
       }
-
+      logReadKey(lastRecord);
+      
           // Using String for a large buffer abuses the heap
           // and takes up a lot of time. We will build 
           // relatively short response elements with String
@@ -121,11 +145,7 @@ uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
       bufr[4] = '\n'; 
       bufrPos = 5;
       server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-      // chunked content implicit with CONTENT_LENGTH_UNKNOWN in new core webServer. (02_02_22)  
-      //server.sendHeader("Accept-Ranges","none");
-      //server.sendHeader("Transfer-Encoding","chunked");
       server.send(200,"application/json","");
-
       replyData = "[";
       UnixTime = startUnixTime;
       state = process;
@@ -141,8 +161,9 @@ uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
           // Loop to generate entries
       
       while(UnixTime <= endUnixTime) {
+        int rtc;
         logRecord->UNIXtime = UnixTime;
-        int rtc = iotaLog.readKey(logRecord);
+        logReadKey(logRecord);
         trace(T_GFD,2);
         replyData += '[';  //  + String(UnixTime) + "000,";
         elapsedHours = logRecord->logHours - lastRecord->logHours;
@@ -150,22 +171,25 @@ uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
         while((reqPtr = reqPtr->next) != nullptr){
           int channel = reqPtr->channel;
           if(rtc || logRecord->logHours == lastRecord->logHours){
-             replyData +=  "null";
+            replyData +=  "null";
           }
   
             // input channel
 
-          else if(channel < 100){
+          else if(channel >= 0){
             trace(T_GFD,3);       
-            if(reqPtr->queryType == QUERY_VOLTAGE) {
-              replyData += String((logRecord->channel[channel].accum1 - lastRecord->channel[channel].accum1) / elapsedHours,1);
+            if(reqPtr->queryType == 'V') {
+              replyData += String((logRecord->accum1[channel] - lastRecord->accum1[channel]) / elapsedHours,1);
             } 
-            else if(reqPtr->queryType == QUERY_POWER) {
-              replyData += String((logRecord->channel[channel].accum1 - lastRecord->channel[channel].accum1) / elapsedHours,1);
+            else if(reqPtr->queryType == 'P') {
+              replyData += String((logRecord->accum1[channel] - lastRecord->accum1[channel]) / elapsedHours,1);
             }
-            else if(reqPtr->queryType == QUERY_ENERGY) {
-              replyData += String((logRecord->channel[channel].accum1 / 1000.0),2);
-            }  
+            else if(reqPtr->queryType == 'E') {
+                replyData += String((logRecord->accum1[channel] / 1000.0),3);              
+            } 
+            else {
+              replyData += "null";
+            } 
           }
   
            // output channel
@@ -175,20 +199,31 @@ uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
             if(reqPtr->output == nullptr){
               replyData += "null";
             }
-            else if(reqPtr->queryType == QUERY_ENERGY){
-              replyData += String(reqPtr->output->run([](int i)->double {
-                return logRecord->channel[i].accum1 / 1000.0;}), 2);
+            else if(reqPtr->queryType == 'V'){
+              replyData += String(reqPtr->output->run(lastRecord, logRecord, elapsedHours), 1);
+            }
+            else if(reqPtr->queryType == 'P'){
+              replyData += String(reqPtr->output->run(lastRecord, logRecord, elapsedHours), 1);
+            }
+            else if(reqPtr->queryType == 'E'){
+                replyData += String(reqPtr->output->run((IotaLogRecord*) nullptr, logRecord, 1000.0), 3);
+            }
+            else if(reqPtr->queryType == 'O'){
+              replyData += String(reqPtr->output->run(lastRecord, logRecord, elapsedHours), reqPtr->output->precision());
             }
             else {
-              replyData += String(reqPtr->output->run([](int i)->double {
-                return (logRecord->channel[i].accum1 - lastRecord->channel[i].accum1) / elapsedHours;}), 1);
+              replyData += "null";
             }
+          }
+          if(replyData.endsWith("NaN")){
+            replyData.remove(replyData.length()-3);
+            replyData += "null";
           }
           replyData += ',';
         } 
            
         replyData.setCharAt(replyData.length()-1,']');
-        swapRecord = lastRecord;
+        IotaLogRecord* swapRecord = lastRecord;
         lastRecord = logRecord;
         logRecord = swapRecord;
         UnixTime += intervalSeconds;
@@ -223,10 +258,14 @@ uint32_t handleGetFeedData(struct serviceBlock* _serviceBlock){
       
       sendChunk(bufr, 5); 
       trace(T_GFD,7);
+      replyData = "";
       delete reqRoot.next;
       delete[] bufr;
+      delete logRecord;
+      delete lastRecord;
       state = Setup;
       serverAvailable = true;
+      HTTPrequestFree++;
       return 0;                                       // Done for now, return without scheduling.
     }
   }
@@ -250,4 +289,3 @@ void sendChunk(char* bufr, uint32_t bufrPos){
   //   to the WiFiClient and avoid conversion to String and related heap requirements.
   server.client().write(bufr, bufrPos+2);
 } 
-   

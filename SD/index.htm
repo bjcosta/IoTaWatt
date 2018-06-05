@@ -1,21 +1,5 @@
 <!DOCTYPE html>
-<!--
-	IoTaWatt Electric Power Monitor Configuration Application
-    Copyright (C) <2017>  Bob Lemaire, IoTaWatt, Inc.
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
--->
+<!-- version 02_03_02 -->
 <html lang="en-US">
 <head>
 <meta charset="utf-8">
@@ -24,41 +8,93 @@
 
 </head>
 <body onload="setup()">
-
-<div class="outerContainer color_outer">
+  
+<div id="outerContainer" class="color_outer">
   <h3 id="heading">IoTaWatt Power Monitor</h3>
-
-  <div class="bigIdeasDiv color_menu" id="bigIdeas">
+  
+  <div id="mainMenu" class="menu color_menu" display="block">
     <table id="bigIdeasTable">
       <tr>
-        <td width="50%"><button ID="BIBdevice" class="mainMenuButton" onclick="menuButton(this,configureDevice)">Configure Device</button></td>
-        <td width="50%"><button ID="BIBstatus" class="mainMenuButton" onclick="menuButton(this,statusBegin)">Input Channels Status</button></td>
-      </tr><tr>
-        <td><button ID="BIBinputs" class="mainMenuButton" onclick="menuButton(this,buildInputsList)">Configure Inputs</button></td>
-        <td><button ID="BIBmsgs" class="mainMenuButton" onclick="menuButton(this,showMsgs)">Message Log</button><br></td>
-      </tr><tr>
-        <td><button ID="BIBoutputs" class="mainMenuButton" onclick="menuButton(this,buildOutputsList)">Configure Outputs</button></td>
-        <td><button ID="BIBgraph" class="mainMenuButton" onclick="menuButton(this,loadGraph)">Run Local Graph App</button><br></td>
-      </tr><tr>
-        <td><button ID="BIBserver" class="mainMenuButton" onclick="menuButton(this,buildWebServer)">Setup Web Server</button><br></td>
-        <td><button ID="BIBedit" class="mainMenuButton" onclick="menuButton(this,loadEdit)">Run Edit and File Manager App</button></td>
-      </tr><tr>
-        <td></td>
-        <td></td>
+        <td class="dropdown">
+          <button class="mainMenuButton buttonUp dropbtn">Setup</button>
+          <span class="dropContent">
+            <button class="mainMenuButton" onclick="mainMenuButton(this,configDevice)">Device</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,configInputs)">Inputs</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,configOutputs)">Outputs</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,buildWebServer)">Web Server</button>
+          </span>
+        </td>
+        <td width="50%"><button class="mainMenuButton" onclick="mainMenuButton(this,statusBegin)">Status</button></td>
+      </tr>
+      <tr>
+        <td class="dropdown">
+          <button class="mainMenuButton buttonUp dropbtn">Tools</button>
+          <span class="dropContent">
+            <button class="mainMenuButton" onclick="mainMenuButton(this,loadEdit)">File Manager and Editor</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,showMsgs)">Message Log</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,toolsRestart)">Restart</button>
+       <!-- <button class="mainMenuButton" onclick="mainMenuButton(this,toolsDatalogs)">Datalogs</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,toolsWiFi)">WIFi</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,toolsUpdate)">Software Update</button>
+            <button class="mainMenuButton" onclick="mainMenuButton(this,toolsPhase)">Phase Measurement</button> -->
+          </span>
+        </td>
+        <td width="50%"><button class="mainMenuButton" onclick="mainMenuButton(this,loadGraph)">Graphs</button></td>
       </tr>
     </table>
   </div>
-  <div id="divBody" display="inline">
-  <!-- ****************************** divInputs **********************************-->
-
-    <div class="bodyDiv color_body" id="inputList">
-      <h3>Inputs</h3>
-      <table id="inputTable">
-        <tbody id="inputTableBody"></tbody>
+  
+  <div id="mainBody" class="color_body" style="display:none">
+  
+    <div id="configMenu" style="display:none">
+      <table><tr><th width="33%"></th><th width="33%"></th><th width="33%"></th></tr>
+        <tr>
+          <td><button id="tabDevice" class="configButton buttonUp" onclick="configButton(this,configDevice)">Device</button></td>
+          <td><button id="tabInputs" class="configButton buttonUp" onclick="configButton(this,configInputs)">Inputs</button></td>
+          <td><button id="tabOutputs" class="configButton buttonUp" onclick="configButton(this,configOutputs)">Outputs</button></td>
+        </tr>
       </table>
+    </div> <!-- configMenu -->
+     
+                  <!-- *************** Device configuration ******************-->  
+        
+    <div id="configDevice" class="body color_body" style="display: none">
+      <h3>Configure IoTaWatt Device</h3>
+      <table id="deviceTable"></table>
+      <p>
+        <button id="actionBurden" onclick="configBurden()">Configure Burden Resistors</button>
+      </p>
+      <p>
+        <button class="actionCancel" id="deviceCancel" onclick="deviceCancel()">cancel</button>
+        <button class="actionSave" id="deviceSave" onclick="deviceSave()">save</button>
+      </p>
+    </div> 
+    
+    <div id="configBurden" class="body color_body" style="display: none">
+      <h3>Specify on-board burden resistors</h3>
+      <table id="burdenTable"></table>
+      <p>
+        <button class="actionCancel" id="burdenCancel" onclick="burdenCancel()">cancel</button>
+        <button class="actionSave" id="burdenSave" onclick="burdenSave()">save</button>
+      </p>
     </div>
+    
 
-    <div class="bodyDiv color_body" id="inputEdit">
+              <!-- *************** Inputs configuration ******************-->  
+  
+    <div id="configInputs" class="body" style="display: none">
+      <div class="bodyDiv color_body" id="inputList">
+        <h3>Inputs</h3>
+        <table id="inputTable">
+          <tbody id="inputTableBody"></tbody>
+        </table>
+        <div align="center">
+          <input type="checkbox" id="derive3ph" onclick="derive3ph()" title="For 3-phase power with one voltage reference">Enable derived three-phase
+        </div>
+      </div>
+    </div>
+    
+    <div class="body color_body" id="inputEdit" style="display: none">
       <h3 id="inputChannel"></h3>
       <table id="inputEditTable"></table>
       <p>
@@ -68,7 +104,7 @@
       </p>
     </div>
 
-    <div class="bodyDiv color_body" id="inputCalVT">
+    <div class="body color_body" id="inputCalVT" style="display: none">
       <h3 id="inputCalChannel"></h3>
       <h1 id="inputCalVolts"></h1>
       <p>
@@ -82,84 +118,175 @@
       voltage reasonably matches the voltmeter reading.  Click save to update the channel
       with the new calibration factor.</p>
     </div>
+    
+              <!-- *************** Outputs configuration ******************-->
 
-
-     <!--****************************** divOutputs **********************************-->
-
-    <div class="bodyDiv color_body" id="divOutputs">
-      <h3>Outputs</h3>
-      <table id="outputTable"></table>
+    <div id="configOutputs" class="body" style="display: none;">
+      <div class="bodyDiv color_body" id="divOutputs">
+        <h3>Outputs</h3>
+        <table id="outputTable"></table>
+      </div>
     </div>
-
-    <!-- ****************************** divDevice **********************************-->
-
-    <div class="bodyDiv color_body" id="divDevice">
-      <h3>Configure IoTaWatt Device</h3>
-      <table id="deviceTable"></table>
-      <p><button class="actionBurden" id="actionBurden" onclick="configBurden()">Configure Burden Resistors</button></p>
-      <p>
-        <button class="actionCancel" id="deviceCancel" onclick="deviceCancel()">cancel</button>
-        <button class="actionSave" id="deviceSave" onclick="deviceSave()">save</button>
-      </p>
-    </div>
-
-    <!-- ****************************** divBurden **********************************-->
-
-    <div class="bodyDiv color_body" id="divBurden">
-      <h3>Specify on-board burden resistors</h3>
-
-      <table id="burdenTable"></table>
-      <p>
-        <button class="actionCancel" id="burdenCancel" onclick="burdenCancel()">cancel</button>
-        <button class="actionSave" id="burdenSave" onclick="burdenSave()">save</button>
-      </p>
-    </div>
-
-   <!-- ****************************** divWebServer*********************************-->
-
-    <div class="bodyDiv color_body" id="divWebServer">
-      <h3>Setup Web Server</h3>
+    
+                <!-- ************* WebServer ********************--> 
+    
+    <div class="body color_body" id="divWebServer" style="display:none">
+      <h3 id=serverHead>Setup Web Server</h3>
       <form><table id="serverTable"></table></form>
-      <div id="divServerOutputs">
+      <div id="divInfluxTagSet" style="display:none">
+        <h3>tag set</h3>
+        <table id="influxTagSet"></table>
+      </div>
+      <div id="divServerOutputs" style="display:none">
         <h3 id="serverOutputsHeader">Outputs</h3>
         <table id="serverOutputs"></table>
       </div>
       <p>
+        <button class="actionDelete" id="serverDelete">delete</button>
         <button class="actionCancel" id="serverCancel" onclick="serverCancel()">cancel</button>
         <button class="actionSave" id="serverSave" onclick="serverSave()">save</button>
       </p>
     </div>
-
-    <!-- ****************************** divStatus **********************************-->
-
-    <div class="bodyDiv color_body" id="divStatus">
-      <table width="100%">
-        <tr><th width="50%">Inputs</th><th width="50%">Outputs</th></tr>
-        <tr valign="top">
-          <td><table id="inputStatusTable"></table></td>
-          <td><table id="outputStatusTable"></table></td>
+    
+    <div class="body color_body" id="divInfluxTag" style="display:none">
+      <h3>Edit influx tag</h3>
+      <table width="80%">
+        <tr><th>tag key</th><th> </th><th>tag value</th></tr>
+        <tr>
+          <td><input id="influxTagKey" oninput="influxTagCheck()"></td>
+          <td>=</td>
+          <td><input id="influxTagValue" oninput="influxTagCheck()" title="enter a string or variable ($name, $units..)."></td>
         </tr>
       </table>
-      <hr>
-      <table width="100%">
-        <tr><th width="50%"></th><th width="50%"></th></tr>
-        <tr valign="top">
-          <td><table id="statusTableL"></table></td>
-          <td><table id="statusTableR"></table></td>
-        </tr>
-      </table>
-      <table id="statusTable"></table>
+      
+      <p>Tags are optional key-value pairs of metadata that can be associated with the measurement.
+      Because they are indexed, queries on tags perform better than queries on fields.
+      </p>
+      <p>When tags are specified, IoTaWatt assumes the first tag is unique to this measurement
+      and is referenced to determine the time of last measurement during restart recovery. 
+      In that way, an IoTaWatt can maintain context and continuity where multiple data
+      sources are writing to a single database.</p>
+      <p>Tag-values can be a fixed string, or one of the variables $device, $name, $units</p>
+      <p>
+        <button class="actionDelete" id="influxTagDelete">delete</button>
+        <button class="actionCancel" id="influxTagCancel" onclick="influxTagCancel()">cancel</button>
+        <button class="actionSave" id="influxTagSave">save</button>
+      </p>
+    </div>
+              
+    
+    <!-- ****************************** divStatus **********************************--> 
+    
+    <div id="divStatus" class="body color_body" style="display:none">
+      <button id="tabIO" class="groupTab" onclick="toggleDisplay('statusIODiv')">Inputs/Outputs Status</button>
+        <div id="statusIODiv" class="statusDiv" style="display: block;">
+          <table id="statusIOBody" width="100%">
+            <tr><th width="60%">Inputs</th><th width="40%">Outputs</th></tr>
+            <tr valign="top">
+              <td><table id="inputStatusTable"></table></td>
+              <td><table id="outputStatusTable"></table></td>
+            </tr>
+          </table>
+        </div>
+      <button id="tabStats" class="groupTab" onclick="toggleDisplay('statusStatsDiv')">IoTaWatt Statistics</button>
+        <div id="statusStatsDiv" class="statusDiv" style="display: block;">
+           <table width="100%">
+            <tr><th width="50%"></th><th width="50%"></th></tr>
+            <tr valign="top">
+              <td><table id="statusTableL"></table></td>
+              <td><table id="statusTableR"></table></td>
+            </tr>
+          </table>
+          <table id="statusTable"></table>
+        </div>
+      <button id="tabinflux" class="groupTab" onclick="toggleDisplay('statusInfluxDiv')")>InfluxDB</button>
+        <div id="statusInfluxDiv" class="statusDiv" style="display: none;"></div>
+      <button id="tabLogs" class="groupTab" onclick="toggleDisplay('statusLogsDiv')">Data Logs</button>
+        <div id="statusLogsDiv" class="statusDiv" style="display: none;"></div>
     </div> <!-- divStatus -->
-
-    <!-- ******************************divCalc **********************************-->
-
-    <div class="bodyDiv color_body" id="divCalc">
-      <div class="inputContainer color_inputcontainer" id="calcBody"><form>
-        <h3 style="text-align:center">Configure Output</h3>
-        <h3> Name: <input type="text" id="calcName" pattern="[a-zA-Z]{1}[a-zA-Z0-9_]*" oninput="refreshCalcDisplay()" title="invalid name"></h3>
-        <h3> Units: <input id="calcUnits" oninput="refreshCalcDisplay()"></h3></form>
-        <h3 class="calcDisplay" id="calcDisplay">0</h3>
-          <table class="calcTable"><tr><th></th><th></th><th></th><th></th></tr>
+  
+    <!--*************************************************************************************************
+  
+                                    Tools
+  
+     ***************************************************************************************************-->
+  
+    <!-- ****************************** Restart **********************************--> 
+      
+    <div id="divRestart" class="body tools color_body" style="display:none">
+      <h3>Reset IoTaWatt!</h3>
+      <p>
+        Press the restart button below to reset the IoTaWatt.<br>
+        Restart can take up to 30 seconds, longer if loading new software.<br>
+        After restart, refresh the browser window if this app fails to restart.
+      </p>
+      <h3 id="restartMsg"></h3>
+      <button id="restartButton" onclick="sendRestart()">Restart</button>
+    </div> <!-- divrestart -->
+    
+    <!-- ****************************** WiFi **********************************--> 
+      
+    <div id="divWiFi" class="body tools color_body" style="display:none">
+      <h3>Manage WiFi</h3>
+      <p>
+        Use this tool to permanently disconnect from the current WiFi network.<br>
+      </p>
+      <h3 id="WiFiMsg"></h3>
+      <button id="WiFiButton" onclick="sendDisconnect()">Disconnect</button>
+    </div> 
+    
+    <!-- **************************** Datalogs ****************************** --> 
+      
+    <div id="divLogs" class="body tools color_body" style="display:none">
+      <h3>Datalogs</h3>
+      <table id="logsTable">
+        
+        <!--
+        <tr><th>Log</th><th>Begins</th><th>Ends</th><th>Size</th><th>wrap</th></tr>
+        <tr id="logsCurrent"></tr>
+        <tr id="logsHistory"></tr> -->
+      </table>
+      <button id="logsTab" class="groupTab" onclick="toggleDisplay('logsDelete')">Datalog delete functions</button>
+      <div id="logsDelete" style="display:none">
+        <h3>Delete Datalogs</h3>
+        <h3>Deleted logs cannot be recovered!</h3>
+        <p>
+          This is the only safe way to delete Data Logs.<br>
+          The IoTaWatt will restart.<br>
+        </p><p>
+          <button onclick="toolsDataLogsDelete('current')">Delete Current Log</button>
+           a new log will created beginning now.<br>
+        </p><p>
+          <button onclick="toolsDataLogsDelete('history')">Delete History Log</button>
+          a new history log will be built from the current log.<br>
+        </p>
+        <div id="logsConfirm" style="display:none">
+          <h3 id="logsMsg"></h3>
+          <p>Click DELETE to confirm.</p>
+          <button class="actionCancel" onclick="toolsDataLogsCancel()">Cancel</button>
+          <button id="logsConfirm" class="actionDelete">DELETE</button>
+        </div>
+      </div>
+    </div> <!--
+  
+    <!- *************************************************************************************************
+  
+                                    Calculator
+  
+    ****************************************************************************************************-->
+    
+    <div id="divCalc" class="color_body" style="display:none">
+      <div id="calcBody" class="color_inputcontainer">
+        <form>
+          <h3  style="text-align:center">Configure Output</h3>
+          <table><tr><th width="30%"></th><th></th></tr>
+            <tr><td class="calcField"><strong>Name:</strong></td><td><input id="calcName" pattern="[a-zA-Z]{1}[a-zA-Z0-9_]*" oninput="refreshCalcDisplay()" title="invalid name"></td></tr>
+            <tr><td class="calcField"><strong>Units:</strong></td><td><select id="calcUnits" oninput="refreshCalcDisplay()"></td>
+            </tr>
+          </table>
+        </form>
+        <h3 id="calcDisplay">0</h3>  
+          <table id="calcTable"><tr><th></th><th></th><th></th><th></th></tr>
           <tr><td><button class="calcButton calcClr" onclick="keyClearAll()" title="Clear all" value="C">C</button></td>
           <td><button class="calcButton calcBack" onclick="keyClearEntry()" title="Clear last entry" value="CE">CE</button></td>
           <td> <button class="calcButton calcBack" onclick="keyClearChar()" title = "Backspace" value="del">&#x21e6;</button></td>
@@ -191,15 +318,15 @@
           <td> <button class="calcButton calcAbs" onclick="keyUniPos()" value="abs" title="make previous result positive">abs</button></td>
           <td></td></tr>
         </table>
-        <p>
+        <div id="calcActions">
           <button class="actionDelete" id="calcDelete" onclick="calcDelete()">delete</button>
           <button class="actionCancel" id="calcCancel" onclick="calcCancel();">cancel</button>
           <button class="actionSave" id="calcSave" onclick="calcSave()">save</button>
-        </p>
+        </div> 
       </div>
     </div>
-  </div> <!-- divBody -->
-</div>
+  </div> <!-- mainBody -->  
+</div> <!-- outerContainer -->
 
 <script>
 // configuration files
@@ -217,6 +344,7 @@ var configSHA256;
 var config;                         // configuration as Js Object
 var tables;                         // tables as Js Object
 var editing = false;
+var editingScript = false;
 var getStatus = false;
 var calVoltageUpdate = false;
 var avgVoltage = 0;
@@ -230,27 +358,153 @@ var parenLevel = 0;
 var inputEditChannel;
 var voltageChannels = [];
 var vchanUsed = [];
+var vphaseNames = ["A", "B", "C"];
 var scriptEditTable;
 var scriptEditSet;
 var scriptEditIndex = -1;
 var scriptEditSave;
 var scriptEditReturn;
+var scriptEditUnits = [];
+var scriptEditUnitsOutput = ["Watts","Volts","Amps","Hz","PF","VA"];
+var scriptEditUnitsUpload = ["Watts","Volts","Amps","Hz","PF","VA","Wh","kWh"];
+
+/***************************************************************************************************
+ *                       Shorthand functions
+* ************************************************************************************************/
+function EbyId(id) {return document.getElementById(id)};
+
+/***************************************************************************************************
+ *                       Tools
+* ************************************************************************************************/
+function toolsRestart() {
+  EbyId("restartMsg").innerHTML = "";
+  currentBodyPush("divRestart");
+}
+
+function sendRestart(){
+  var xmlHttp = new XMLHttpRequest();
+  xmlHttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      editing = true;
+      EbyId("restartMsg").innerHTML = "Restarting...";
+      setTimeout(function(){setup();},15000);
+    }
+  }
+  xmlHttp.open("GET","/command?restart=yes", true);
+  xmlHttp.send(null);
+}
+
+function toolsWiFi() {
+  EbyId("WiFiMsg").innerHTML = "";
+  currentBodyPush("divWiFi");
+}
+
+function sendDisconnect(){
+  var xmlHttp = new XMLHttpRequest();
+  xmlHttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      editing = true;
+      EbyId("WiFiMsg").innerHTML = "Disconnected";
+      setTimeout(function(){setup();},15000);
+    }
+  }
+  xmlHttp.open("GET","/command?disconnect=yes", true);
+  xmlHttp.send(null);
+}
+
+function toolsDatalogs(){
+  currentBodyPush("divLogs");
+  toolsDatalogsStatus();
+}
+
+function toolsDataLogsCancel(){
+  EbyId("logsConfirm").onclick="";
+  EbyId("logsMsg").innerHTML = "";
+  EbyId("logsConfirm").style.display = "none";
+  editing = false;
+  toggleDisplay("logsDelete");
+}
+
+
+function toolsDatalogsStatus(){
+  var xmlHttp = new XMLHttpRequest();
+  xmlHttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var status = JSON.parse(xmlHttp.responseText);
+      EbyId("logsTable").innerHTML = "<tr><th>Attribute</th><th>Current Log</th><th>History Log</th></tr>";
+      formatLine("Start Date",formatDateTime(status.datalogs.currlog.firstkey),formatDateTime(status.datalogs.histlog.firstkey));
+      formatLine("End Date",formatDateTime(status.datalogs.currlog.lastkey),formatDateTime(status.datalogs.histlog.lastkey));
+      formatLine("File Size",status.datalogs.currlog.size,status.datalogs.histlog.size);
+      formatLine("Interval (sec)",status.datalogs.currlog.interval,status.datalogs.histlog.interval);
+      formatLine("Complete", density(status.datalogs.currlog) + "%", density(status.datalogs.histlog) + "%");
+      return;            
+      function formatLine(attribute, value1, value2){
+        EbyId("logsTable").innerHTML += "<tr><td>" + attribute + "</td><td>" + value1 + "</td><td>" + value2 + "</td></tr>";
+      }
+      function density(log){
+        return ( (log.size / 256) * 100 /((log.lastkey-log.firstkey)/ log.interval)).toFixed(1);
+      }
+    }
+  }
+  xmlHttp.open("GET","/status?datalogs=yes", true);
+  xmlHttp.send(null);
+}
+
+function toolsDataLogsCommit(log){
+  var xmlHttp = new XMLHttpRequest();
+  xmlHttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      var msg = EbyId("logsMsg");
+      msg.innerHTML = "Deleting " + log + " and restarting.";
+      setTimeout(function(){toolsDataLogsCancel(); setup();},15000);
+    }
+  }
+  var uri = "/command?deletelog=" + log;
+  xmlHttp.open("GET", uri, true);
+  xmlHttp.send(null);
+}
+
+function toolsDataLogsDelete(log){
+  var msg = EbyId("logsMsg");
+  msg.innerHTML = "You are about to permanently delete the ";
+  if(log == "current"){
+    msg.innerHTML += "current log.";
+    EbyId("logsConfirm").setAttribute("onclick","toolsDataLogsCommit('current')");
+  }
+  else if (log == "history"){
+    msg.innerHTML += "history log.";
+    EbyId("logsConfirm").setAttribute("onclick","toolsDataLogsCommit('history')");
+  }
+  else {
+    toolsDataLogsCancel();
+    return;
+  }
+  EbyId("logsConfirm").style.display = "block";
+  editing = true;
+}
 
 /***************************************************************************************************
  *                        Configure Inputs
  * ************************************************************************************************/
-
-function buildInputsList(){
-  currentBodyPush("inputList");
-  var inputsTable = document.getElementById("inputTableBody");
+function configInputs(){
+  currentBodyPush("configInputs");
+  var inputsTable = EbyId("inputTableBody");
   inputsTable.innerHTML = "";
   voltageChannels = [];
+  EbyId("derive3ph").disabled = false;
   for(i in config.inputs){
     vchanUsed[i] = false;
-    if(config.inputs[i] !== null && config.inputs[i].type == "VT"){
-      voltageChannels.push(i);
+    if(config.inputs[i] !== null){
+      if(config.inputs[i].type == "VT"){
+        voltageChannels.push(i);
+      }
+      if(config.inputs[i].vphase !== undefined && config.inputs[i].vphase != 0){
+        config.derive3ph = true;
+        EbyId("derive3ph").disabled = true;
+      }
     }
   }
+  EbyId("derive3ph").checked = config.derive3ph ? true : false;
   for( i in config.inputs){
     var newRow = inputsTable.insertRow(-1);
     newRow.setAttribute("class","chanEditRow");
@@ -264,18 +518,28 @@ function buildInputsList(){
     newColumn = newRow.insertCell(-1);
     if(config.inputs[i] !== null){
       nameColumn.innerHTML += "<strong>" + config.inputs[i].name + "</strong>";
-      newColumn.innerHTML = "<small>type:</small>" + config.inputs[i].type;
-      newColumn.innerHTML += ", <small>model:</small>" + config.inputs[i].model;
-      newColumn.innerHTML += ", <small>cal:</small>" + config.inputs[i].cal;
-      newColumn.innerHTML += ", <small>phase:</small>" + config.inputs[i].phase;
+      newColumn.innerHTML = "<small><strong>" + config.inputs[i].type + "</strong>";
+      newColumn.innerHTML += ", <strong>" + config.inputs[i].model + "</strong>";
+      newColumn.innerHTML += ", cal:<strong>" + Number(config.inputs[i].cal).toFixed(2) + "</strong>";
+      newColumn.innerHTML += ", lead:<strong>" + Number(config.inputs[i].phase).toFixed(2) + "&#176</strong>";
       if(config.inputs[i].vchan !== undefined){
         vchanUsed[config.inputs[i].vchan] = true;
         if(config.inputs[i].vchan != 0){
-          newColumn.innerHTML += ", <small>Vref:</small>" + config.inputs[i].vchan;
+          newColumn.innerHTML += ", Vref:<strong>" + config.inputs[i].vchan + "</strong>";
         }
+      }
+      if(config.derive3ph){
+        var phase = (config.inputs[i].vphase === undefined) ? vphaseNames[0] : vphaseNames[config.inputs[i].vphase/120];
+        newColumn.innerHTML += ", phase:<strong>" + phase + "</strong>";
       }
     }
   }
+}
+
+function derive3ph(){
+  config.derive3ph = !config.derive3ph;
+  uploadConfig();
+  configInputs();
 }
 
 function inputEdit(channel){
@@ -297,20 +561,20 @@ function inputEditMsg(element, msg){
 
 function refreshInputEdit(){
   var complete = true;
-  var table = document.getElementById("inputEditTable");
+  var table = EbyId("inputEditTable");
   table.innerHTML = "";
-  document.getElementById("inputChannel").innerHTML = "Configure Input " + inputEditChannel;
-
+  EbyId("inputChannel").innerHTML = "Configure Input " + inputEditChannel;
+  
   var newInput = addTableRow(table, "Burden:", "inputBurden", "span");
   if(config.device.burden[inputEditChannel] == 0) inputBurden.innerHTML = "none configured.";
   else if(Number.isInteger(config.device.burden[inputEditChannel])) inputBurden.innerHTML = config.device.burden[inputEditChannel].toFixed(0) + " ohms";
   else inputBurden.innerHTML = config.device.burden[inputEditChannel].toFixed(1) + " ohms";
-
+  
   var inputName = addTableRow(table, "Name: ", "inputName", "input", 12);
   inputName.setAttribute("onblur","inputEditObject.name=this.value.trim(); refreshInputEdit();");
   inputName.value = inputEditObject.name;
   inputName.pattern = "[A-Za-z]{1}[a-zA-Z0-9_]*";
-
+  
   if(inputName.value == ""){
     inputEditMsg(inputName, "Please specify a name");
     complete = false;
@@ -327,21 +591,21 @@ function refreshInputEdit(){
       complete = false;
     }
   }
-
+  
   newInput = addTableRow(table, "Type: ", "inputType", "select");
-  newInput.setAttribute("oninput","inputEditNewType(this.value); refreshInputEdit();");
+  newInput.setAttribute("onchange","inputEditNewType(this.value); refreshInputEdit();");
   var option = document.createElement("option");
   option.text = inputEditObject.type;
   option.selected = true;
-  newInput.add(option);
+  newInput.add(option); 
   option = document.createElement("option");
   option.text = (inputEditObject.type == "CT") ? "VT" : "CT";
   newInput.add(option);
-
+  
   inputModel = addTableRow(table, "Model: ", "inputModel", "select");
   var option = document.createElement("option");
   option.text = "generic";
-  inputModel.add(option);
+  inputModel.add(option); 
   if(inputEditObject.type == "VT"){
     for(i in tables.VT){
       option = document.createElement("option");
@@ -349,14 +613,17 @@ function refreshInputEdit(){
       inputModel.add(option);
       if(inputEditObject.model == option.text){
         option.selected = true;
-      }
+      } 
     }
   }
   else {
     for(i in tables.CT){
+      option = document.createElement("option");
+      option.text = tables.CT[i].model;
+      if(tables.CT[i].mfg !== undefined){
+        option.title = tables.CT[i].mfg;
+      }
       if(tables.CT[i].type == "C" && config.device.burden[inputEditChannel] > 0){
-        option = document.createElement("option");
-        option.text = tables.CT[i].model;
         inputModel.add(option);
         if(inputEditObject.model == option.text){
           option.selected = true;
@@ -366,20 +633,18 @@ function refreshInputEdit(){
         }
       }
       else if(tables.CT[i].type == "V" && config.device.burden[inputEditChannel] == 0){
-        option = document.createElement("option");
-        option.text = tables.CT[i].model;
         inputModel.add(option);
         if(inputEditObject.model == option.text){
           option.selected = true;
           inputEditObject.cal = tables.CT[i].cal;
           inputEditObject.phase = tables.CT[i].phase;
-        }
+        } 
       }
     }
   }
-  inputModel.setAttribute("oninput","inputEditNewModel(this)");
-
-  if(inputEditObject.model == "generic" &&
+  inputModel.setAttribute("onchange","inputEditNewModel(this)");
+  
+  if(inputEditObject.model == "generic" && 
     (inputEditObject.type == "VT" ||
     (inputEditObject.type == "CT" && config.device.burden[inputEditChannel] == 0))){
     inputCal = addTableRow(table, "Cal: ", "inputCal", "input", 5);
@@ -393,7 +658,7 @@ function refreshInputEdit(){
       inputCal.value = parseFloat(inputCal.value).toPrecision(4);
     }
   }
-
+  
   if(inputEditObject.model == "generic" && inputEditObject.type == "CT" && config.device.burden[inputEditChannel] > 0){
     inputTurns = addTableRow(table, "Turns: ", "inputTurns", "input", 5);
     inputTurns.setAttribute("onblur","inputEditObject.turns = this.value.trim(); refreshInputEdit();");
@@ -413,9 +678,9 @@ function refreshInputEdit(){
       }
     }
   }
-
+ 
   if(inputEditObject.model == "generic"){
-    inputPhase = addTableRow(table, "Phase: ", "inputPhase", "input", 4);
+    inputPhase = addTableRow(table, "Phase lead: ", "inputPhase", "input", 4);
     inputPhase.setAttribute("onblur","inputEditObject.phase = this.value.trim(); refreshInputEdit();");
     inputPhase.value = inputEditObject.phase;
     if(Number.isNaN(inputPhase.value)){
@@ -423,40 +688,59 @@ function refreshInputEdit(){
       complete = false;
     }
     else {
-      inputPhase.value = Number(inputPhase.value).toFixed(1);
+      inputPhase.value = Number(inputPhase.value).toFixed(2);
     }
   }
-
-   if(inputEditObject.type == "CT" && voltageChannels.length > 1){
-    inputVchan = addTableRow(table, "VRef", "inputVchan", "select");
-    inputVchan.setAttribute("oninput","inputEditObject.vchan = Number(this.value); refreshInputEdit();");
-    for(i in voltageChannels){
-      option = document.createElement("option");
-      option.value = voltageChannels[i];
-      option.text = config.inputs[voltageChannels[i]].name;
-      inputVchan.add(option);
-      if(inputEditObject.vchan !== undefined && inputEditObject.vchan == voltageChannels[i]){
-        option.selected = true;
+  
+  if(inputEditObject.type == "CT"){
+    if(voltageChannels.length > 1){
+      inputVchan = addTableRow(table, "VRef", "inputVchan", "select");
+      inputVchan.setAttribute("oninput","inputEditObject.vchan = Number(this.value); refreshInputEdit();");
+      for(i in voltageChannels){
+        option = document.createElement("option");
+        option.value = voltageChannels[i];
+        option.text = config.inputs[voltageChannels[i]].name;
+        inputVchan.add(option);
+        if(inputEditObject.vchan !== undefined && inputEditObject.vchan == voltageChannels[i]){
+          option.selected = true;
+        } 
+      }
+    }
+    if(config.derive3ph){
+      inputVchan = addTableRow(table, "Mains Phase", "inputVphase", "select");
+      inputVchan.setAttribute("oninput","inputEditObject.vphase = Number(this.value); refreshInputEdit();");
+      for(i in vphaseNames){
+        option = document.createElement("option");
+        option.value = i * 120;
+        option.innerHTML = vphaseNames[i];
+        if(i > 0){
+          option.innerHTML += " (+" + option.value + "&#176)";
+        }
+        inputVchan.add(option);
+        if(inputEditObject.vphase !== undefined && inputEditObject.vphase == option.value){
+          option.selected = true;
+        } 
       }
     }
   }
-
+  
   if(inputEditObject.type == "CT"){
     inputNeg = addTableRow(table, "", "inputNeg", "input");
     inputNeg.parentNode.appendChild(document.createTextNode("Allow negative power value"));
     inputNeg.setAttribute("type","checkbox");
-    if(config.inputs[inputEditChannel].signed){
+    inputNeg.setAttribute("onchange","inputEditObject.signed = this.checked; refreshInputEdit();");
+    if(inputEditObject.signed != undefined && inputEditObject.signed){
       inputNeg.checked = true;
     }
     else {
-      config.inputs[inputEditChannel].signed = undefined;
+      inputEditObject.signed = undefined;
     }
-    inputNeg.setAttribute("onchange","config.inputs[inputEditChannel].signed = this.checked; refreshInputEdit();");
-    document.getElementById("inputEditDelete").style.display = (config.inputs[inputEditChannel] == null) ? "none" : "inline";
+    
+    EbyId("inputEditDelete").style.display = (config.inputs[inputEditChannel] == null) ? "none" : "inline";
   }
 
   if(inputEditObject.type == "VT"){
-    document.getElementById("inputEditDelete").style.display =
+    EbyId("inputEditDelete").style.display = 
       (config.inputs[inputEditChannel] == null || vchanUsed[inputEditChannel]) ? "none" : "inline";
     if(complete){
       inputCal = addTableRow(table, "", "inputCal", "button");
@@ -466,7 +750,7 @@ function refreshInputEdit(){
     }
   }
 
-  document.getElementById("inputEditSave").style.display = complete ? "inline" : "none";
+  EbyId("inputEditSave").style.display = complete ? "inline" : "none";
 }
 
 function inputEditNewModel(obj){
@@ -521,16 +805,19 @@ function inputEditDelete(){
 
 function inputEditCancel(){
   currentBodyPop();
-  getConfig(buildInputsList);
+  getConfig(configInputs);
   editing = false;
 }
 
 function inputEditSave(){
+  if(inputEditObject && inputEditObject.vphase !== undefined && inputEditObject.vphase == 0){
+    inputEditObject.vphase = undefined;
+  }
   config.inputs[inputEditChannel] = inputEditObject;
   editing = false;
   currentBodyPop();
   uploadConfig();
-  buildInputsList();
+  configInputs();
 }
 
       // This is used by other sections as well
@@ -559,17 +846,17 @@ function addTableText(table,col1Text,col2Text){
 }
 
 /**********************************************************************************************************************************
- *
+ * 
  *  Voltage calibration
- *
+ * 
  * *******************************************************************************************************************************/
 
 function calVTvoltage(obj){
   currentBodyPush("inputCalVT");
-  document.getElementById("inputCalChannel").innerHTML = "Calibrate Voltage Channel " + inputEditChannel;
-  document.getElementById("inputCalVolts").innerHTML = "120.1";
-  document.getElementById("inputCalCal").value = inputEditObject.cal;
-
+  EbyId("inputCalChannel").innerHTML = "Calibrate Voltage Channel " + inputEditChannel;
+  EbyId("inputCalVolts").innerHTML = "120.1";
+  EbyId("inputCalCal").value = inputEditObject.cal;
+  
   calRefreshVoltage = true;
   calVTvolts = 0;
   calUpdateVoltage();
@@ -596,17 +883,17 @@ function calUpdateVoltage(){
         var response = JSON.parse(xmlHttp.responseText);
         if(calVTvolts == 0) calVTvolts = response.vrms;
         else calVTvolts = .8 * calVTvolts + .2 * response.vrms;
-        document.getElementById("inputCalVolts").innerHTML = calVTvolts.valueOf().toFixed(1);
+        EbyId("inputCalVolts").innerHTML = calVTvolts.valueOf().toFixed(1);
         calUpdateVoltage();
       }
     }
   }
-  xmlHttp.open("GET","/vcal?channel=" + inputEditChannel + "&cal=" + Number(document.getElementById("inputCalCal").value), true);
+  xmlHttp.open("GET","/vcal?channel=" + inputEditChannel + "&cal=" + Number(EbyId("inputCalCal").value), true);
   xmlHttp.send(null);
 }
 
 function calVTsave(obj){
-  inputEditObject.cal = Number(document.getElementById("inputCalCal").value);
+  inputEditObject.cal = Number(EbyId("inputCalCal").value);
   currentBodyPop();
   calRefreshVoltage = false;
   inputEditSave();
@@ -615,37 +902,38 @@ function calVTsave(obj){
 /*******************************************************************************************
  *                    Configure Outputs
  * ****************************************************************************************/
- function buildOutputsList(){
-    currentBodyPush("divOutputs");
-    document.getElementById("calcName").title="Name must be alphanumeric and start with a letter";
-    document.getElementById("calcName").pattern="[a-zA-Z]{1}[a-zA-Z0-9_]*";
+ function configOutputs(){
+    currentBodyPush("configOutputs");
+    EbyId("calcName").title="Name must be alphanumeric and start with a letter";
+    EbyId("calcName").pattern="^[a-zA-Z]{1}[a-zA-Z0-9_]{0,15}$";
     scriptEditSave = function(){
       config.outputs = scriptEditSet
       uploadConfig();
     };
     scriptEditReturn = function(){
-      document.getElementById("divCalc").style.display = "none";
-      document.getElementById("divOutputs").style.display = "table";
-      buildOutputsList();
+      EbyId("divCalc").style.display = "none";
+      EbyId("divOutputs").style.display = "table";
+      configOutputs();
     };
-    scriptEditTable = document.getElementById("outputTable");
+    scriptEditTable = EbyId("outputTable");
     scriptEditTable.innerHTML = "";
     scriptEditSet = config.outputs;
+    scriptEditUnits = scriptEditUnitsOutput;
     editScript();
   }
-
+  
   /**********************************************************************************************
    *                editScript() - Generic Output Script Editor with "calculator"
-   *
+   * 
    *                Caller must initialize these global variables.
-   *
+   * 
    *                scriptEditTable - the table element in which to build the list
    *                scriptEditSet - the array containing the individual Scripts
    *                scriptEditSave - function  to be used to save the edited scriptSet
    *                scriptEditReturn - function to be called upon completion of an edit.
-   *
+   *                
    * *******************************************************************************************/
-
+   
   function editScript(){
     scriptEditIndex = -1;
     table = scriptEditTable;
@@ -670,7 +958,7 @@ function calVTsave(obj){
       var editButton = document.createElement("button");
       editButton.setAttribute("class","outputEditButton");
       editButton.appendChild(document.createTextNode("edit"));
-      editButton.setAttribute("onclick","editOutput(" + i +")");
+      editButton.setAttribute("onclick","calculator(" + i +")");
       selColumn.appendChild(editButton);
     }
     var newRow = document.createElement("tr");
@@ -683,12 +971,11 @@ function calVTsave(obj){
     editButton.appendChild(document.createTextNode("add"));
     editButton.setAttribute("onclick","addOutput()");
     selColumn.appendChild(editButton);
-    editing = false;
   }
-
-
+   
+  
   function calcBuildDropdown(){
-    var inputDropdown = document.getElementById("calcInputDropdown-content");
+    var inputDropdown = EbyId("calcInputDropdown-content");
     inputDropdown.innerHTML = "";
     for(i in config.inputs){
       if(config.inputs[i] != null){
@@ -701,30 +988,31 @@ function calVTsave(obj){
     }
   }
 
-  function editOutput(index){
+  function calculator(index){
+    editingScript = true;
     currentBodyPush("divCalc");
-    document.getElementById("calcName").value = scriptEditSet[index].name;
-    document.getElementById("calcUnits").value = scriptEditSet[index].units;
+    EbyId("calcName").value = scriptEditSet[index].name;
+    buildUnitsList(scriptEditSet[index].units);
     tokens = parseScript(scriptEditSet[index].script);
-    document.getElementById("calcDelete").style.display = "inline";
+    EbyId("calcDelete").style.display = "inline";
     scriptEditIndex = index;
-    editing = true;
     refreshCalcDisplay();
   }
-
+ 
   function addOutput(){
+    editingScript = true;
     currentBodyPush("divCalc");
-    document.getElementById("calcName").value = "";
-    document.getElementById("calcUnits").value = "";
+    EbyId("calcName").value = "";
+    buildUnitsList("watts");
     tokens = ["#0"];
-    document.getElementById("calcDelete").style.display = "none";
+    EbyId("calcDelete").style.display = "none";
     scriptEditIndex = scriptEditSet.length;
     refreshCalcDisplay();
-    editing = true;
   }
 
   function calcCancel(){
     currentBodyPop();
+    editingScript = false;
     scriptEditReturn();
   }
 
@@ -732,9 +1020,9 @@ function calVTsave(obj){
     if(scriptEditIndex < scriptEditSet.length){
       scriptEditSet.splice(scriptEditIndex,1);
     }
-    scriptEditSet.push({name:document.getElementById("calcName").value.trim(),
-                        units:document.getElementById("calcUnits").value.trim(),
-                        script:tokens.join("")
+    scriptEditSet.push({name:EbyId("calcName").value.trim(),
+                        units:EbyId("calcUnits").value.trim(),
+                        script:tokens.join("") 
                       });
     scriptEditSet.sort(function(a, b){return a.name.toString().localeCompare(b.name.toString())});
     for(var i=0; i<scriptEditSet.length-1; i++){
@@ -742,28 +1030,48 @@ function calVTsave(obj){
     }
     scriptEditSave();
     currentBodyPop();
+    editingScript = false;
     scriptEditReturn();
   }
-
+  
   function calcDelete(){
     scriptEditSet.splice(scriptEditIndex,1);
     scriptEditSave();
     currentBodyPop();
+    editingScript = false;
     scriptEditReturn();
   }
 
   function refreshCalcDisplay(){
-    document.getElementById("calcDisplay").innerHTML = scriptDisplay(tokens);
-    if(document.getElementById("calcName").value.trim() == "" ||
-       parenLevel > 0 ||
-       RegExp("^[-+*\/]").test(tokens[tokens.length-1])){
-      document.getElementById("calcSave").style.display = "none";
+    EbyId("calcDisplay").innerHTML = scriptDisplay(tokens);
+    var calcName = EbyId("calcName");
+    if(EbyId("calcName").value.trim() == "" ||
+      parenLevel > 0 || 
+      RegExp("^[-+*\/]").test(tokens[tokens.length-1])){
+      EbyId("calcSave").style.display = "none";
     }
-    else if(document.getElementById("calcName").validity.valid){
-      document.getElementById("calcSave").style.display = "inline";
+    else if (! RegExp(calcName.pattern).test(calcName.value)){
+      EbyId("calcSave").style.display = "none";
+    }
+    else EbyId("calcSave").style.display = "inline";
+  }
+  
+  function buildUnitsList(units){
+    var calcUnits = EbyId("calcUnits");
+    while(calcUnits.hasChildNodes()){
+      calcUnits.removeChild(calcUnits.firstChild);
+    }
+    for(i in scriptEditUnits){
+      var option = document.createElement("option");
+      option.value = scriptEditUnits[i];
+      option.innerHTML = scriptEditUnits[i];
+      calcUnits.appendChild(option);
+      if(option.value == units){
+        option.selected = true;
+      }
     }
   }
-
+  
   function parseScript(script){
     return script.match(/@\d+|#-?\d+\.?\d*|[-+*\/()|=]/g);
   }
@@ -798,7 +1106,7 @@ function calVTsave(obj){
     }
     keyClearEntry();
   }
-
+  
   function keyClearEntry(){
     if(tokens[tokens.length-1] == ")"){
       parenLevel++;
@@ -814,7 +1122,7 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+  
   function keyClearChar(){
     if(RegExp("^[-+*\/()|@]").test(tokens[tokens.length-1])){
       keyClearEntry();
@@ -827,7 +1135,7 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+  
   function keyDigit(digit){
     if(RegExp("^#0").test(tokens[tokens.length-1])){
       tokens[tokens.length-1] = "#" + digit;
@@ -840,7 +1148,7 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+  
   function keyDecimal(){
     if(RegExp("^#-?[0-9]*$").test(tokens[tokens.length-1])){
       tokens[tokens.length-1] += ".";
@@ -850,7 +1158,7 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+  
   function keyUniNeg(){
     if(RegExp("^#[0-9]+\.?[0-9]*").test(tokens[tokens.length-1])){
       tokens[tokens.length-1] = tokens[tokens.length-1].charAt(0) + "-" + tokens[tokens.length-1].substr(1);
@@ -860,14 +1168,14 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+  
   function keyUniPos(){
     if(RegExp("[@)]").test(tokens[tokens.length-1])){
        tokens.push("|");
      }
      refreshCalcDisplay();
   }
-
+  
   function keyBinFunc(op){
     if(RegExp("^[@#)\|]").test(tokens[tokens.length-1])){
       tokens.push(op);
@@ -877,7 +1185,7 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+  
   function keyPush(){
     if(tokens.length == 1 && tokens[0] == "#0") {
         tokens[0] = "(";
@@ -889,7 +1197,7 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+  
   function keyPop(){
     if(parenLevel > 0 && RegExp("^[@#|)]").test(tokens[tokens.length-1])){
       tokens.push(")");
@@ -897,7 +1205,7 @@ function calVTsave(obj){
       refreshCalcDisplay();
     }
   }
-
+  
   function keyInput(obj){
     if(tokens.length == 1 && tokens[0] == "#0") {
       tokens[0] = "@" + obj.value;
@@ -907,13 +1215,13 @@ function calVTsave(obj){
     }
     refreshCalcDisplay();
   }
-
+ 
 /********************************************************************************************
  *                                    Configure Device
  * ******************************************************************************************/
 
-function configureDevice(){
-  currentBodyPush("divDevice");
+function configDevice(){
+  currentBodyPush("configDevice");
   originalName = config.device.name;
   timezone = config.timezone;
   buildDevice();
@@ -921,16 +1229,16 @@ function configureDevice(){
 
 function buildDevice(){
   var updateClasses = ["NONE", "MAJOR", "MINOR", "BETA", "ALPHA"];
-  var deviceTable = document.getElementById("deviceTable");
+  var deviceTable = EbyId("deviceTable");
   deviceTable.innerHTML = "";
   editing = false;
   originalName = config.device.name;
-
+  
   var deviceName = addTableRow(deviceTable, "Device name:","deviceName", "input", 8);
   deviceName.value = config.device.name;
   deviceName.setAttribute("oninput","config.device.name = this.value.trim(); checkDevice();");
   deviceName.pattern = "[a-zA-Z]{1}[0-9a-zA-Z]{3,7}";
-
+  
   var deviceTimezone = addTableRow(deviceTable, "Time Zone:","deviceTimezone", "input", 3);
   deviceTimezone.value = config.timezone;
   deviceTimezone.setAttribute("onchange","config.timezone = this.value; checkDevice();");
@@ -939,7 +1247,7 @@ function buildDevice(){
   deviceTimezone.setAttribute("min","-12");
   deviceTimezone.setAttribute("max","12");
   deviceTimezone.setAttribute("step","1");
-
+  
   var deviceUpdate = addTableRow(deviceTable, "Auto-update Class:","deviceUpdate", "select");
   for(i in updateClasses){
     var option = document.createElement("option");
@@ -947,17 +1255,18 @@ function buildDevice(){
     if(config.update == updateClasses[i]) option.selected = true;
     deviceUpdate.add(option);
   }
-  deviceUpdate.setAttribute("oninput","config.update = this.value; checkDevice();");
+  deviceUpdate.setAttribute("onchange","config.update = this.value; checkDevice();");
 }
 
 function checkDevice(){
+  editing = true;
   var complete = true;
   var nameChange = false;
   if( ! validateInput("deviceName")) complete = false;
   else {
     if(config.device.name != originalName){
       nameChange = true;
-      var obj = document.getElementById("deviceName");
+      var obj = EbyId("deviceName");
       obj.parentNode.appendChild(document.createElement("BR"));
       obj.parentNode.appendChild(document.createTextNode("Name changed, IoTaWatt will restart on Save."));
       obj.parentNode.appendChild(document.createElement("BR"));
@@ -965,20 +1274,20 @@ function checkDevice(){
     }
   }
   if( ! validateInput("deviceTimezone")) complete = false;
-  document.getElementById("actionBurden").style.display = (complete && (!nameChange)) ? "inline" : "none";
-  document.getElementById("deviceSave").style.display = complete ? "inline" : "none";
+  EbyId("actionBurden").style.display = (complete && (!nameChange)) ? "inline" : "none";
+  EbyId("deviceSave").style.display = complete ? "inline" : "none";
 }
 
 function deviceCancel(){
-  currentBodyPop();
   config.device.name = originalName;
   config.timezone = timezone;
   editing = false;
-  resetDisplay();
+  currentBodyPop();
 }
 
 function deviceSave(){
   currentBodyPop();
+  editing = false;
   uploadConfig(resetDisplay, (config.device.name != originalName) ? "restart" : "reload");
 }
 
@@ -987,12 +1296,8 @@ function deviceSave(){
  * ******************************************************************************************/
 
 function configBurden(){
-  currentBodyPush("divBurden");
-  buildBurden();
-}
-
-function buildBurden(){
-  var burdenTable = document.getElementById("burdenTable");
+  currentBodyPush("configBurden");
+  var burdenTable = EbyId("burdenTable");
   burdenTable.innerHTML = "";
   for(var i=0; i<config.device.channels; i++){
     var newRow = burdenTable.insertRow(-1);
@@ -1007,17 +1312,18 @@ function buildBurden(){
     newInput.value = config.device.burden[i];
     newCol.appendChild(newInput);
     faults = 0;
-    document.getElementById("burdenSave").style.display = "inline";
+    EbyId("burdenSave").style.display = "inline";
   }
 }
 
 function newBurden(obj, index){
+  editing = true;
   var val = Number(obj.value);
   var msg = obj.nextSibling;
   if (msg != null){
     faults--;
     obj.parentNode.removeChild(obj.nextSibling);
-  }
+  } 
   if(Number.isNaN(val)){
     obj.parentNode.appendChild(document.createTextNode(" Must be numeric."));
     faults++;
@@ -1027,95 +1333,72 @@ function newBurden(obj, index){
     faults++;
   }
   else {
-    config.device.burden[index] = Number(val.toFixed(1));
+    config.device.burden[index] = Number(val.toFixed(2));
     if(Number.isInteger(val)){
       config.device.burden[index] = Number(val.toFixed(0));
     }
     obj.value = config.device.burden[index];
   }
-  document.getElementById("burdenSave").style.display = faults ? "none" : "inline";
+  EbyId("burdenSave").style.display = faults ? "none" : "inline";
 }
 
 function burdenCancel(){
   getConfig();
   currentBodyPop();
-}
-
+}  
+ 
 function burdenSave(){
   currentBodyPop();
-  uploadConfig(resetDisplay);
+  uploadConfig();
 }
 
 /********************************************************************************************
- *                                     Setup Web Server
+ *                                     Setup Web Server 
  * ******************************************************************************************/
 
 function buildWebServer(){
-  var servers = ["None", "Emoncms", "InfluxDB", "PVOutput"];
-  document.getElementById("serverOutputs").innerHTML = "";
-  document.getElementById("serverOutputsHeader").innerHTML = "";
-  currentBodyPush("divWebServer");
-  var serverTable = document.getElementById("serverTable");
+  var servers = ["Emoncms", "InfluxDB", "PVOutput"];
+  EbyId("serverHead").innerHTML = "Web Server Setup";
+  EbyId("divInfluxTagSet").style.display = "none";
+  EbyId("divServerOutputs").style.display = "none";
+  var serverTable = EbyId("serverTable");
   serverTable.innerHTML = "";
-  document.getElementById("divServerOutputs").style.display = "none";
-  var serverSelect = addTableRow(serverTable, "Web Service Type", "serverType", "select");
-  serverSelect.setAttribute("oninput","newServer(this)");
+  currentBodyPush("divWebServer");
+  var serverSelect = addTableRow(serverTable, "Web Service", "serverType", "select");
+  serverSelect.setAttribute("onchange","editServer(this)");
+  var option = document.createElement("option");
+  option.text = "select server";
+  serverSelect.add(option);
 
   for(i in servers){
     var option = document.createElement("option");
     option.text = servers[i];
-    if(config.server.type.toLowerCase() == servers[i].toLowerCase()) option.selected = true;
+    option.value = servers[i];
+    if(servers[i].toLowerCase() == "emoncms"){
+      option.text += (config.server.type.toLowerCase() == "emoncms") ? " (edit)" : " (add)";
+    }
+    if(servers[i].toLowerCase() == "influxdb"){
+      option.text += (config.influxdb !== undefined) ? " (edit)" : " (add)";
+    }
+    if(servers[i].toLowerCase() == "pvoutput"){
+      option.text += (config.pvoutput !== undefined) ? " (edit)" : " (add)";
+    }
     serverSelect.add(option);
   }
-  if(config.server.type.toLowerCase() == "emoncms"){
-    buildEmoncms();
-  }
-  else if(config.server.type.toLowerCase() == "influxdb"){
-    buildInfluxdb();
-  }
-  else if(config.server.type.toLowerCase() == "pvoutput"){
-    buildPVOutput();
-  }
-  else if(config.server.type.toLowerCase() == "none"){
-    document.getElementById("serverSave").style.display = "inline";
-  }
+  EbyId("serverDelete").style.display = "none";
+  EbyId("serverSave").style.display = "none";
 }
 
-function newServer(obj){
-  editing = true;
-  if(obj.value.toLowerCase() == "none"){
-    config.server = {type:"none"};
-  }
-  else if(obj.value.toLowerCase() == "emoncms"){
-    config.server =  {type:"emoncms",
-                      node:config.device.name,
-                      postInterval:10,
-                      bulksend:1,
-                      url:"http://emoncms.org",
-                      apikey:"",
-                      userid:""
-                      };
+function editServer(obj){
+  if(obj.value.toLowerCase() == "emoncms"){
+    editEmoncms();
   }
   else if(obj.value.toLowerCase() == "influxdb"){
-    config.server =  {type:"influxdb",
-                      postInterval:10,
-                      bulksend:1,
-                      url:"",
-                      "database":"",
-                      "outputs":[]
-                      };
+    editInfluxdb();
   }
   else if(obj.value.toLowerCase() == "pvoutput"){
-    config.server =  {type:"pvoutput",
-                      reportInterval:300,
-                      "apiKey":"",
-                      "systemId":"",
-                      "mainsChannel":-1,
-                      "solarChannel":-1,
-                      "httpTimeout":2000
-                      };
+    editPvoutput();
   }
-  buildWebServer();
 }
 
 function serverSave(){
@@ -1133,73 +1416,95 @@ function serverCancel(){
 /***********************************************************************************************
  *                                Configure eMonCMS
  * ********************************************************************************************/
-function buildEmoncms(){
-  var serverTable = document.getElementById("serverTable");
+function editEmoncms(){
+  editing = true;
+  var serverTable = EbyId("serverTable");
+  serverTable.innerHTML = "";
+  
+  if(config.server.type.toLowerCase() != "emoncms"){
+    config.server =  {type:"emoncms",
+                      revision:0,
+                      node:config.device.name,
+                      postInterval:10,
+                      bulksend:1,
+                      url:"http://emoncms.org",
+                      apikey:"",
+                      user:"",
+                      pwd:"",
+                      };
+    EbyId("serverDelete").style.display = "none";
+    EbyId("serverHead").innerHTML = "Add Emoncms Service";
+  }
+  else {
+    config.server.revision++;
+    EbyId("serverHead").innerHTML = "Edit Emoncms Service";
+    EbyId("serverDelete").style.display = "inline";
+    EbyId("serverDelete").setAttribute("onclick","deleteEmoncms();");
+  }
+
   if(config.server.username !== undefined){
     config.server.userid = config.server.username;
     config.server.username = undefined;
   }
+  
   if(config.server.outputs === undefined){
     config.server.outputs = [];
     for(var i=0; i<config.device.channels; i++){
       config.server.outputs.push({name:i+1, script:"@"+i});
     }
   }
-
-  var nodeInput = addTableRow(serverTable, "Node name:", "serverNode", "input", 8);
+  
+  var nodeInput = addTableRow(serverTable, "Node:", "serverNode", "input", 8);
   nodeInput.value = config.server.node;
-  nodeInput.setAttribute("onchange","config.server.node = this.value; checkEmoncms();");
-  nodeInput.setAttribute("style","width: 80px;");
-  nodeInput.setAttribute("min","0");
-  nodeInput.setAttribute("max","99");
-  nodeInput.setAttribute("step","1");
-
+  nodeInput.onchange = "config.server.node = this.value; checkEmoncms();";
+  nodeInput.style = "width: 80px;";
+  
   var postInput =   addTableRow(serverTable, "post interval(sec): ", "serverPost", "input", 3);
   postInput.value = Number(config.server.postInterval);
   postInput.setAttribute("onchange","config.server.postInterval = Number(this.value); checkEmoncms();");
   postInput.setAttribute("style","width: 40px;");
   postInput.type = "number";
-  postInput.setAttribute("min","0");
-  postInput.setAttribute("max","3600");
-  postInput.setAttribute("step","5");
-
+  postInput.min = 5;
+  postInput.max = 3600;
+  postInput.step = 5;
+  
   if(isNaN(config.server.bulksend)) config.server.bulksend = 1;
   var bulksendInput = addTableRow(serverTable, "bulk send:", "serverBulk", "input", 3);
   bulksendInput.value = Number(config.server.bulksend);
   bulksendInput.setAttribute("onchange","config.server.bulksend = Number(this.value); checkEmoncms();");
   bulksendInput.style = "width: 40px;";
   bulksendInput.type = "number";
-  bulksendInput.min = "1";
-  bulksendInput.max = "10";
-  bulksendInput.step = "1";
+  bulksendInput.min = 1;
+  bulksendInput.max = 60;
+  bulksendInput.step = 1;
   bulksendInput.title = "Send multiple entries in a single HTTP transaction";
-
+  
   var urlInput = addTableRow(serverTable, "server URL:", "serverURL", "input", 32);
   urlInput.value = config.server.url
   urlInput.setAttribute("onchange","config.server.url = this.value; checkEmoncms();");
-  urlInput.setAttribute("type","url");
-
+  urlInput.type = "url";
+  
   var keyInput = addTableRow(serverTable, "api key:", "serverKey", "input", 32);
   keyInput.value = config.server.apikey;
-  keyInput.setAttribute("oninput","config.server.apikey = this.value; checkEmoncms();");
-  keyInput.setAttribute("size","32");
+  keyInput.setAttribute("onchange","config.server.apikey = this.value; checkEmoncms();");
+  keyInput.size = 32;
   keyInput.pattern = "[0-9a-f]{32}";
   keyInput.title = "read/write key - 32 hexadecimal digits";
-
+  
   addTableText(serverTable,"","Specifying userid triggers secure encrypted protocol.")
   var keyInput = addTableRow(serverTable, "Emoncms userid", "serverUser", "input", 10);
   if(config.server.userid === undefined) config.server.userid = "";
   keyInput.value = config.server.userid;
-  keyInput.setAttribute("onchange","config.server.userid = this.value; checkEmoncms()");
+  keyInput.setAttribute("onchange","config.server.userid = this.value; checkEmoncms();");
   keyInput.setAttribute("size","16");
   keyInput.pattern = "[0-9]*";
   keyInput.title = "In upper-left corner of Emoncms My Account";
-
-  document.getElementById("divServerOutputs").style.display = "inline";
-  document.getElementById("serverOutputsHeader").innerHTML = "Emoncms inputs";
-
-  document.getElementById("calcName").pattern="[1-9]{1}[0-9]?";
-  document.getElementById("calcName").title="Name is Emoncms Input Key 1-99";
+  
+  EbyId("divServerOutputs").style.display = "inline";
+  EbyId("serverOutputsHeader").innerHTML = "Emoncms inputs";
+  
+  EbyId("calcName").pattern="^[1-9]{1}$|^[1-2]{1}[0-9]{1}$";
+  EbyId("calcName").title="Name is Emoncms Input Key 1-29";
   scriptEditSave = function(){
     scriptEditSet.sort(function(a, b){return a.name - b.name});
     config.server.outputs = scriptEditSet;
@@ -1209,8 +1514,9 @@ function buildEmoncms(){
     editScript();
     checkEmoncms();
   };
-  scriptEditTable = document.getElementById("serverOutputs");
+  scriptEditTable = EbyId("serverOutputs");
   scriptEditSet = config.server.outputs;
+  scriptEditUnits = scriptEditUnitsUpload;
   editScript();
   checkEmoncms();
 }
@@ -1223,80 +1529,292 @@ function checkEmoncms(){
                  validateInput("serverKey") &&
                  validateInput("serverUser") &&
                  (config.server.apikey != "");
-  document.getElementById("serverSave").style.display = complete ? "inline" : "none";
+  EbyId("serverSave").style.display = complete ? "inline" : "none";
 }
 
-function validateInput(id){
-  var obj = document.getElementById(id);
+function deleteEmoncms(){
+  config.server = {type: "none"};
+  serverSave();
+}
+
+function validateInput(id, required=false, msg=undefined){
+  var obj = EbyId(id);
   while(obj.nextSibling !== null) obj.parentNode.removeChild(obj.nextSibling);
-  if(obj.validationMessage == "") return true;
-  obj.parentNode.appendChild(document.createElement("BR"));
-  obj.parentNode.appendChild(document.createTextNode(obj.validationMessage));
-  return false;
+  if(obj.validationMessage != ""){
+    obj.parentNode.appendChild(document.createElement("BR"));
+    obj.parentNode.appendChild(document.createTextNode(msg === undefined ? obj.validationMessage : msg));
+    return false;
+  }
+  if(required && obj.value == ""){
+    obj.parentNode.appendChild(document.createElement("BR"));
+    obj.parentNode.appendChild(document.createTextNode("Required"));
+    return false;
+  }
+  return true;
 }
 
 /***********************************************************************************************
  *                                Configure influxDB
  * ********************************************************************************************/
-function buildInfluxdb(){
-  var serverTable = document.getElementById("serverTable");
-
+function editInfluxdb(){
+  editing = true;
+  
+  var serverTable = EbyId("serverTable");
+  serverTable.innerHTML = "";
+  
+  if(config.influxdb === undefined){
+    config.influxdb = {type:"influxdb",
+                      revision: 0,
+                      postInterval:10,
+                      bulksend:6,
+                      url:"",
+                      "database": "iotawatt",
+                      "measurement":"",
+                      "tagset": [],
+                      "outputs":[]
+                      };
+    EbyId("serverDelete").style.display = "none";
+    EbyId("serverHead").innerHTML = "Add influxDB Service";
+  }
+  else {
+    config.influxdb.revision++;
+    EbyId("serverHead").innerHTML = "Edit influxDB Service";
+    EbyId("serverDelete").style.display = "inline";
+    EbyId("serverDelete").setAttribute("onclick","deleteInfluxdb();");
+  }
+  
   var postInput =   addTableRow(serverTable, "post interval(sec): ", "serverPost", "input", 3);
-  postInput.value = Number(config.server.postInterval);
-  postInput.setAttribute("onchange","config.server.postInterval = Number(this.value); checkInfluxdb();");
+  postInput.value = Number(config.influxdb.postInterval);
+  postInput.setAttribute("onchange","config.influxdb.postInterval = Number(this.value); checkInfluxdb();");
   postInput.setAttribute("style","width: 40px;");
   postInput.type = "number";
   postInput.setAttribute("min","0");
   postInput.setAttribute("max","3600");
   postInput.setAttribute("step","5");
-
-  if(isNaN(config.server.bulksend)) config.server.bulksend = 1;
+  
+  if(isNaN(config.influxdb.bulksend)) config.influxdb.bulksend = 1;
   var bulksendInput = addTableRow(serverTable, "bulk send:", "serverBulk", "input", 3);
-  bulksendInput.value = Number(config.server.bulksend);
-  bulksendInput.setAttribute("onchange","config.server.bulksend = Number(this.value); checkInfluxdb();");
+  bulksendInput.value = Number(config.influxdb.bulksend);
+  bulksendInput.setAttribute("onchange","config.influxdb.bulksend = Number(this.value); checkInfluxdb();");
   bulksendInput.setAttribute("style","width: 40px;");
   bulksendInput.setAttribute("type","number");
   bulksendInput.setAttribute("min","1");
   bulksendInput.setAttribute("max","10");
   bulksendInput.setAttribute("step","1");
-
+  
   var urlInput = addTableRow(serverTable, "server URL:", "serverURL", "input", 32);
-  urlInput.value = config.server.url
-  urlInput.setAttribute("onchange","config.server.url = this.value; checkInfluxdb();");
-  urlInput.setAttribute("type","url");
-
+  urlInput.value = config.influxdb.url
+  urlInput.setAttribute("oninput","config.influxdb.url = this.value; checkInfluxdb();");
+  urlInput.type = "url";
+  
   var dbInput = addTableRow(serverTable, "database:", "serverDb", "input", 16);
-  dbInput.value = config.server.database;
-  dbInput.setAttribute("oninput","config.server.database = this.value; checkInfluxdb();");
-  dbInput.pattern = "^[0-9a-zA-Z_$-/\.\+]+$";
+  dbInput.value = config.influxdb.database;
+  dbInput.setAttribute("oninput","config.influxdb.database = this.value; checkInfluxdb();");
+  dbInput.pattern = "^[^'\"\\s]*$";
+  
+  var RetpInput = addTableRow(serverTable, "retention policy", "serverRetp", "input", 16);
+  RetpInput.setAttribute("oninput","config.influxdb.retp = this.value; checkInfluxdb();");
+  RetpInput.pattern = "^[^'\"\\s]*$";
+  if(config.influxdb.retp !== undefined){
+    RetpInput.value = config.influxdb.retp;
+  } else {
+    RetpInput.value = "";
+  }
+  RetpInput.placeholder = "optional";
+  
+  if(config.influxdb.user === undefined) config.influxdb.user = "";
+  var userInput = addTableRow(serverTable, "username:", "serverUser", "input", 16);
+  userInput.value = config.influxdb.user;
+  userInput.setAttribute("oninput","config.influxdb.user = this.value; checkInfluxdb();");
+  userInput.pattern = "^[^'\"\\s]*$";
+  userInput.placeholder = "optional";
 
-  document.getElementById("divServerOutputs").style.display = "inline";
-  document.getElementById("serverOutputsHeader").innerHTML = "influxDB fields";
+  if(config.influxdb.pwd === undefined) config.influxdb.pwd = "";
+  var pwdInput = addTableRow(serverTable, "password:", "serverPwd", "input", 16);
+  pwdInput.value = config.influxdb.pwd;
+  pwdInput.setAttribute("oninput","config.influxdb.pwd = this.value; checkInfluxdb();"); 
+  pwdInput.pattern = "^[^'\"\\s]*$";
+  pwdInput.type = "password";
+  pwdInput.placeholder = "optional";
+  
+  var begdateInput = addTableRow(serverTable, "upload history from:", "serverBegd", "input", 16);
+  begdateInput.setAttribute("oninput",
+    "config.influxdb.begdate = new Date(this.value).getTime()/1000 - config.timezone*3600; checkInfluxdb();");
+  begdateInput.value =  toInputDate(config.influxdb.begdate + config.timezone*3600);
+  begdateInput.type = "date";
+  
+  if(config.influxdb.measurement === undefined) config.influxdb.measurement = "";
+  var measInput = addTableRow(serverTable, "measurement", "serverMeas", "input", 16);
+  measInput.setAttribute("oninput","config.influxdb.measurement = this.value; checkInfluxdb();");
+  measInput.value = config.influxdb.measurement;
+  measInput.pattern = "^[^'\"\\s]*$";
+  measInput.placeholder = "default is $name";
+  measInput.title = "enter a string or $name, $units, if not specified $name will be used.";
+  
+  if(config.influxdb.fieldkey === undefined) config.influxdb.fieldkey = "";
+  var fkeyInput = addTableRow(serverTable, "field-key", "serverFkey", "input", 16);
+  fkeyInput.setAttribute("oninput","config.influxdb.fieldkey = this.value; checkInfluxdb();");
+  fkeyInput.value = config.influxdb.fieldkey;
+  fkeyInput.pattern = "^[^'\"\\s]*$";
+  fkeyInput.placeholder = "default is 'value'";
+  fkeyInput.title = "enter a string or $name, $units. if not specified, 'value' will be used.";
+  
+  EbyId("divInfluxTagSet").style.display = "inline";
+  buildTagSet();
+  
+  EbyId("divServerOutputs").style.display = "inline";
+  EbyId("serverOutputsHeader").innerHTML = "measurements";
 
-  document.getElementById("calcName").title="Name must be valid influxDB field name";
-  document.getElementById("calcName").pattern="^[0-9a-zA-Z_$-/\.\+]+$";
+  EbyId("calcName").title="Name must be valid influxDB field name";
+  EbyId("calcName").pattern="^[0-9a-zA-Z_$-/\.\+]+$";
   scriptEditSave = function(){
-    config.server.outputs = scriptEditSet;
+    config.influxdb.outputs = scriptEditSet;
   };
   scriptEditReturn = function(){
     scriptEditTable.innerHTML = "";
     editScript();
     checkInfluxdb();
   };
-  scriptEditTable = document.getElementById("serverOutputs");
-  scriptEditSet = config.server.outputs;
+  scriptEditTable = EbyId("serverOutputs");
+  scriptEditSet = config.influxdb.outputs;
+  scriptEditUnits = scriptEditUnitsUpload;
   editScript();
   checkInfluxdb();
 }
 
+function toInputDate(unixtime){
+  var date = new Date(unixtime * 1000);
+  var month = date.getMonth()+1;
+  var day = date.getDate()+1;
+  return date.getFullYear() + '-' + (month < 10 ? '0' : '') + month.toString() + '-' + (day < 10 ? '0' : '') + day.toString();
+}
+
 function checkInfluxdb(){
   var complete = true;
+  if(config.influxdb.retp == "") config.influxdb.retp = undefined;
+  if(config.influxdb.user == "") config.influxdb.user = undefined;
+  if(config.influxdb.pwd == "") config.influxdb.pwd = undefined;
+  if(config.influxdb.measurement == "") config.influxdb.measurement = undefined;
+  if(config.influxdb.fieldkey == "") config.influxdb.fieldkey = undefined;
   if( ! validateInput("serverPost")) complete = false;
   if( ! validateInput("serverBulk")) complete = false;
-  if( ! validateInput("serverDb")) complete = false;
-  if( ! validateInput("serverURL")) complete = false;
-  if(config.server.outputs.length == 0) complete = false;
-  document.getElementById("serverSave").style.display = complete ? "inline" : "none";
+  if( ! validateInput("serverURL", true, "not a valid url")) complete = false;
+  if( ! validateInput("serverDb", true, "alphanumeric")) complete = false;
+  if( ! validateInput("serverRetp", false, "invalid string")) complete = false;
+  if( ! validateInput("serverUser", config.influxdb.pwd !== undefined, "invalid string")) complete = false;
+  if( ! validateInput("serverPwd", config.influxdb.user !== undefined, "invalid string")) complete = false;
+  if( ! validateInput("serverMeas",false, "invalid string")) complete = false;
+  if( ! validateInput("serverFkey", false, "invalid string")) complete = false;
+  if( ! validateInput("serverBegd", false)) complete = false;
+  if(config.influxdb.outputs.length == 0) complete = false;
+  EbyId("serverSave").style.display = complete ? "inline" : "none";
+}
+
+function deleteInfluxdb(){
+  config.influxdb = undefined;
+  serverSave();
+}
+
+function buildTagSet(){
+  table = EbyId("influxTagSet");
+  table.innerHTML = "";
+  for(i in config.influxdb.tagset){
+    var newRow = document.createElement("tr");
+    table.appendChild(newRow);
+    newRow.setAttribute("class","outputsRow");
+    var selColumn = document.createElement("td");
+    newRow.appendChild(selColumn);
+    var keyColumn = document.createElement("td");
+    newRow.appendChild(keyColumn);
+    var valueColumn = document.createElement("td");
+    newRow.appendChild(valueColumn);
+    var noteColumn = document.createElement("td");
+    newRow.appendChild(noteColumn);
+    var editButton = document.createElement("button");
+    editButton.setAttribute("class","outputEditButton");
+    editButton.appendChild(document.createTextNode("edit"));
+    editButton.setAttribute("onclick","influxTagEdit(" + i + ");");
+    selColumn.appendChild(editButton);
+    keyColumn.innerHTML = config.influxdb.tagset[i].key;
+    valueColumn.innerHTML = config.influxdb.tagset[i].value;
+    if(i == 0){
+      noteColumn.innerHTML = "(uniquely identifies this device)";
+    }
+  }
+  var newRow = document.createElement("tr");
+  table.appendChild(newRow);
+  newRow.setAttribute("class","outputsRow")
+  var selColumn = document.createElement("td");
+  newRow.appendChild(selColumn);
+  var editButton = document.createElement("button");
+  editButton.setAttribute("class","outputEditButton");
+  editButton.appendChild(document.createTextNode("add"));
+  editButton.setAttribute("onclick","influxTagAdd(" + config.influxdb.tagset.length + ")");
+  selColumn.appendChild(editButton);
+}
+
+function influxTagEdit(index){
+  EbyId("influxTagSave").setAttribute("onclick","influxTagSave(" + index + ");");
+  EbyId("influxTagDelete").setAttribute("onclick","influxTagDelete(" + index + ");");
+  EbyId("influxTagDelete").style.display = "inline";
+  EbyId("influxTagSave").style.display = "inline";
+  EbyId("influxTagKey").value = config.influxdb.tagset[index].key;
+  EbyId("influxTagKey").pattern = "^[^'\"\\s]*$";
+  EbyId("influxTagValue").value = config.influxdb.tagset[index].value;
+  EbyId("influxTagValue").pattern = "^[^'\"\\s]*$";
+  currentBodyPush("divInfluxTag");
+}
+
+function influxTagAdd(index){
+  EbyId("influxTagSave").setAttribute("onclick","influxTagSave(" + index + ");");
+  EbyId("influxTagDelete").style.display = "none";
+  EbyId("influxTagSave").style.display = "none";
+  EbyId("influxTagKey").value = "";
+  EbyId("influxTagKey").pattern = "^[^'\"\\s]*$";
+  EbyId("influxTagValue").value = "";
+  EbyId("influxTagValue").pattern = "^[^'\"\\s]*$";
+  currentBodyPush("divInfluxTag");
+}
+
+function influxTagCancel(){
+  currentBodyPop();
+}
+
+function influxTagDelete(index){
+  config.influxdb.tagset.splice(index,1);
+  buildTagSet();
+  currentBodyPop();
+}
+
+function influxTagSave(index){
+  if(index == config.influxdb.tagset.length){
+    config.influxdb.tagset.push({key:EbyId("influxTagKey").value, value:EbyId("influxTagValue").value});
+  }
+  else {
+    config.influxdb.tagset[index].key = EbyId("influxTagKey").value;
+    config.influxdb.tagset[index].value = EbyId("influxTagValue").value;
+  }
+  buildTagSet();
+  currentBodyPop();
+}
+
+function influxTagCheck(){
+  var complete = true;
+  if( ! validateInput("influxTagKey", true, "invalid string")) complete = false;
+  if( ! validateInput("influxTagValue", true, "invalid string")) complete = false;
+  EbyId("influxTagSave").style.display = complete ? "inline" : "none";
+}
+
+function influxToggle(){
+  if(config.influxdb.stop !== undefined){
+    config.influxdb.stop = ! config.influxdb.stop;
+  }
+  else {
+    config.influxdb.stop = true;
+    
+  }
+  config.influxdb.revision++;
+  uploadConfig();
 }
 
 /***********************************************************************************************
@@ -1370,10 +1888,12 @@ function checkPVOutput(){
 }
 
 
+
 /***********************************************************************************************
  *                        Setup and run status display
  * *******************************************************************************************/
 function statusBegin(){
+  EbyId("tabinflux").style.display = config.influxdb !== undefined ? "inline" : "none";
   currentBodyPush("divStatus");
   getStatus = true;
   statusGet();
@@ -1390,13 +1910,14 @@ function statusGet(){
       statusDisplay(xmlHttp.responseText);
     }
   }
-  xmlHttp.open("GET","/status?inputs=yes&outputs=yes&stats=yes", true);
+  xmlHttp.open("GET","/status?state=yes&inputs=yes&outputs=yes&stats=yes&datalogs=yes&influx=yes", true);
   xmlHttp.send(null);
 }
 
 function statusDisplay(statusMessage){
   var status = JSON.parse(statusMessage);
-  var statusTable = document.getElementById("statusTableL");
+  
+  var statusTable = EbyId("statusTableL");
   statusTable.innerHTML = null;
   addRow();
   column3.appendChild(document.createTextNode("Firmware version: " + status.stats.version));
@@ -1404,7 +1925,8 @@ function statusDisplay(statusMessage){
   column3.appendChild(document.createTextNode("Running time: " + formatRunTime(status.stats.runseconds)));
   addRow();
   column3.appendChild(document.createTextNode("free Heap: " + status.stats.stack));
-  statusTable = document.getElementById("statusTableR");
+  
+  statusTable = EbyId("statusTableR");
   statusTable.innerHTML = null;
   addRow();
   column3.appendChild(document.createTextNode(status.stats.cyclerate.toFixed(0) + " samples per AC cycle"));
@@ -1412,54 +1934,78 @@ function statusDisplay(statusMessage){
   column3.appendChild(document.createTextNode(status.stats.chanrate.toFixed(1) + " AC cycles sampled/second"));
   addRow();
   column3.appendChild(document.createTextNode(status.stats.frequency.toFixed(1) + " Hz"));
-
-  statusTable = document.getElementById("inputStatusTable");
+  
+  if(status.datalogs !== undefined){
+    var logs = EbyId("statusLogsDiv");
+    logs.innerHTML = null;
+    logs.appendChild(document.createTextNode("Current Log from: " + formatDateTime(status.datalogs.currlog.firstkey) + " to: " + formatDateTime(status.datalogs.currlog.lastkey)));
+    logs.appendChild(document.createElement("br"));
+    logs.appendChild(document.createTextNode("History Log from: " + formatDateTime(status.datalogs.histlog.firstkey) + " to: " + formatDateTime(status.datalogs.histlog.lastkey)));
+  }
+  
+  var influxDiv = EbyId("statusInfluxDiv");
+  influxDiv.innerHTML = "";
+  if(status.influx !== undefined){
+    var button = document.createElement("button");
+    button.style = "configButton";
+    button.innerHTML = status.influx.running ? "Stop" : "Start";
+    button.setAttribute("onclick","influxToggle()");
+    influxDiv.appendChild(button);
+    influxDiv.appendChild(document.createTextNode((status.influx.running ? " Running" : " Stopped") + ".  Last update " + formatDateTime(status.influx.lastpost)));
+  } 
+  
+  statusTable = EbyId("inputStatusTable");
   statusTable.innerHTML = "";
   for(i in status.inputs){
     addRow();
-
+    
     for(j in config.inputs){
       if(config.inputs[j] !== null && config.inputs[j].channel == status.inputs[i].channel){
-        if(config.inputs[j].name !== undefined) column1.innerHTML += "<strong>" + config.inputs[j].name + ":</strong>";
+        if (status.inputs[i].reversed)  column1.innerHTML += "<span title=\"CT reversed\">&#8634 </span>";
+        if(config.inputs[j].name !== undefined) {
+          column1.innerHTML += "<strong>" + config.inputs[j].name + ":</strong>";
+        }
         break;
       }
     }
-
-
+    
+    
     if(status.inputs[i].Watts !== undefined){
       var wattNode = document.createElement("font");
-      wattNode.innerHTML = status.inputs[i].Watts + " watts";
+      wattNode.innerHTML = status.inputs[i].Watts + "&nbsp;" + "Watts";
       column3.appendChild(wattNode);
-
+      
       if(status.inputs[i].reversed == "true"){
-        wattNode.setAttribute("color","DarkRed");
-      }
+        //wattNode.setAttribute("color","DarkRed");
+      } 
       if(status.inputs[i].Watts < 0){
           wattNode.setAttribute("color","DarkGreen");
       }
       if(status.inputs[i].Watts >= 60){
         var pf = status.inputs[i].Pf;
-        column3.appendChild(document.createTextNode(", pf: " + pf.toFixed(2)));
+        var pfNode = document.createElement("font");
+        pfNode.innerHTML = ", pf:" + "&nbsp;" + pf.toFixed(2);
+        column3.appendChild(pfNode);
       }
-
+      
     }
     else if(status.inputs[i].Vrms !== undefined){
-      column3.appendChild(document.createTextNode(status.inputs[i].Vrms.toFixed(1) + " volts"));
+      column3.appendChild(document.createTextNode(status.inputs[i].Vrms.toFixed(1) + " Volts"));
     }
   }
-
-  statusTable = document.getElementById("outputStatusTable");
+  
+  statusTable = EbyId("outputStatusTable");
   statusTable.innerHTML = "";
   for(i in status.outputs){
     addRow();
-    column1.innerHTML += "<strong>" + config.outputs[i].name + ":</strong>";
+    column1.innerHTML += "<strong>" + status.outputs[i].name + ":</strong>";
     var wattNode = document.createElement("font");
-    wattNode.innerHTML = status.outputs[i].value.toFixed(0) + " " + status.outputs[i].units;
+    wattNode.innerHTML = status.outputs[i].value.toFixed(unitsPrecision(status.outputs[i].units)) + " " + status.outputs[i].units;
     column3.appendChild(wattNode);
   }
-
-  setTimeout(function(){if(getStatus)statusGet();},1500);
-
+    
+  setTimeout(function(){if(getStatus)statusGet();},1000);
+  
   function addRow(){
     newRow = document.createElement("tr");
     statusTable.appendChild(newRow);
@@ -1473,6 +2019,16 @@ function statusDisplay(statusMessage){
   }
 }
 
+function unitsPrecision(units){
+  if(units == "Watts") return 1;
+  if(units == "Volts") return 1;
+  if(units == "Amps") return 2;
+  if(units == "Hz") return 1;
+  if(units == "PF") return 2;
+  if(units == "VA") return 1;
+  return 1;
+}
+
 function formatRunTime(time){
   var days = Math.floor(time / 86400);
   time -= days * 86400;
@@ -1484,12 +2040,17 @@ function formatRunTime(time){
   return (days > 0 ? days + "d  " : "") +  hours + "h " + minutes + "m " + seconds + "s";
 }
 
+function formatDateTime(unixtime){
+  var date = new Date(unixtime*1000);
+  return date.toLocaleDateString() + " " + date.toLocaleTimeString();
+}
+
 function checkConfig(){
   if(config.device.channels === undefined){
     config.device.channels = 15;
   }
   if(config.inputs === undefined){
-    config.inputs = [{channel:0, type:"VT", model:"generic", cal:10, phase:0}];
+    config.inputs = [{channel:0, type:"VT", model:"generic", cal:10, phase:2}];
   }
   for(var i=0; i<config.inputs.length; i++){
     if(config.inputs[i] === undefined ||
@@ -1497,23 +2058,38 @@ function checkConfig(){
       config.inputs.splice(i,0,null);
     }
   }
- for(var i=config.inputs.length; i<config.device.channels; i++){
+  for(var i=config.inputs.length; i<config.device.channels; i++){
     config.inputs.push(null);
   }
   config.inputs.splice(config.device.channels,config.inputs.length-config.device.channels);
-
+  
   if(config.device.burden === undefined){
     config.device.burden = [0];
-  }
+  } 
   for(var i=config.device.burden.length; i<config.device.channels; i++){
     config.device.burden.push(24);
   }
-
+  for(i in config.inputs){
+    if(config.inputs[i] != null && config.inputs[i].model != "generic"){
+      var table = tables.CT;
+      if(config.inputs[i].type == "VT") table = tables.VT;
+      for(j in table){
+        if(config.inputs[i].model == table[j].model){
+          config.inputs[i].phase = table[j].phase;
+        }
+      }
+    }
+  }
+  
   if(config.format == 1){
     for(i in config.outputs) {
       config.outputs[i].script = old2newScript(config.outputs[i].script);
     }
     config.format == 2;
+  }
+  
+  if(config.server === undefined || config.server.type === undefined){
+    config.server = {type: "none"};
   }
 }
 
@@ -1527,8 +2103,8 @@ function old2newScript(oldScript){
       newScript += "@" + oldScript[i].value;
     }
     else if(oldScript[i].oper == "binop"){
-      newScript += oldScript[i].value;
-    }
+      newScript += oldScript[i].value; 
+    } 
     else if(oldScript[i].oper == "push"){
       newScript += "(";
     }
@@ -1537,7 +2113,7 @@ function old2newScript(oldScript){
     }
     else if(oldScript[i].oper == "abs"){
       newScript += "|";
-    }
+    }   
   }
   return newScript;
 }
@@ -1562,56 +2138,60 @@ function demoStatus(){
   }
   return JSON.stringify(status);
 }
-
+  
 /********************************************************************************************
  *                       Main menu navigation.
  * *****************************************************************************************/
-function menuButton(obj, handler){
-  if( ! editing){
+function mainMenuButton(obj, handler){
+  if( ! (editing || editingScript)){
     currentBodyPop();
     resetDisplay();
-    obj.className = "mainMenuButton buttonDown";
     handler();
   }
-}
+} 
 
 function currentBodyPop(){
-  if(currentBody.length > 0) document.getElementById(currentBody.pop()).style.display = "none";
-  if(currentBody.length > 0) document.getElementById(currentBody[currentBody.length-1]).style.display = "table";
+  if(currentBody.length > 0) EbyId(currentBody.pop()).style.display = "none";
+  if(currentBody.length > 0) EbyId(currentBody[currentBody.length-1]).style.display = "block";
+  else resetDisplay();
 }
+
 function currentBodyPush(newBody){
   if(currentBody.length > 0){
     if(currentBody[currentBody.length-1] == newBody) return;
-    document.getElementById(currentBody[currentBody.length-1]).style.display = "none";
-  }
+    if(currentBody[currentBody.length-1].search("Menu") == -1) {
+      EbyId(currentBody[currentBody.length-1]).style.display = "none";
+    }
+  } 
   currentBody.push(newBody);
-  document.getElementById(currentBody[currentBody.length-1]).style.display = "table";
+  EbyId(currentBody[currentBody.length-1]).style.display = "table";
+  EbyId("mainBody").style.display = "block";
 }
 
 function resetDisplay(){
   getStatus = false;
-  document.getElementById("BIBdevice").className = "mainMenuButton";
-  document.getElementById("BIBinputs").className = "mainMenuButton";
-  document.getElementById("BIBoutputs").className = "mainMenuButton";
-  document.getElementById("BIBserver").className = "mainMenuButton";
-  document.getElementById("BIBstatus").className = "mainMenuButton";
-  document.getElementById("BIBmsgs").className = "mainMenuButton";
-  document.getElementById("BIBgraph").className = "mainMenuButton";
-  document.getElementById("BIBedit").className = "mainMenuButton";
+  editing = false;
   while(currentBody.length > 0) currentBodyPop();
 }
 
 function loadGraph(){
   var myWindow = window.open(graphURL, "_self");
   resetDisplay();
+  getConfig();
 }
 function loadEdit(){
-  var myWindow = window.open(editURL, "_self");
   resetDisplay();
+  var myWindow = window.open(editURL, "_self");
 }
 function showMsgs(){
-  var myWindow = window.open(msgsFileURL, "_self");
   resetDisplay();
+  var myWindow = window.open(msgsFileURL, "_self");
+}
+function toggleDisplay(id){
+  var element = EbyId(id);
+  if(! editing){
+    element.style.display = element.style.display == "none" ? "block" : "none";
+  }
 }
 
 /**********************************************************************************************
@@ -1630,7 +2210,7 @@ function getConfig(callback){
     checkConfig();
     if(callback !== undefined) callback();
     });
-    document.getElementById("bigIdeas").style.display = "table";
+    EbyId("mainMenu").style.display = "block";
 }
 
 function getTables(){
@@ -1656,7 +2236,7 @@ function uploadConfig(callback, action="reload"){
     var xmlHttp = new XMLHttpRequest();
     xmlHttp.onreadystatechange = function() {
       if (this.readyState == 4 && this.status == 200) {
-        if(callback !== undefined) callback();
+        if(callback !== undefined) callback(); 
       }
     }
     xmlHttp.open("GET","/config?update=" + action, true);
@@ -1685,7 +2265,7 @@ function writeFile(fileString, url, responseHandler){
       }
     }
   };
-
+  
   var formData = new FormData();
   var blob = new Blob([fileString], {type: 'plain/text'},  url);
   formData.append("file", blob, url);
@@ -1695,18 +2275,18 @@ function writeFile(fileString, url, responseHandler){
   }
   URI = "/edit" + URI;
   xmlHttp.open("POST", URI);
-
+  
   xmlHttp.send(formData);
 }
 
 
 function setup(){
-  getConfig();
   getTables();
+  getConfig();
   if(document.domain == "iotawatt.com"){
     demo = true;
-    document.getElementById("heading").innerHTML += " Demo Mode";
-  }
+    EbyId("heading").innerHTML += " Demo Mode";
+  } 
   resetDisplay();
 }
 

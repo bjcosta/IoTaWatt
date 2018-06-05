@@ -5,6 +5,7 @@
   *  
   ****************************************************************************************************/
 void samplePower(int channel, int overSample){
+  static uint32_t trapTime = 0;
   uint32_t timeNow = millis();
   
       // If it's a voltage channel, use voltage only sample, update and return.
@@ -31,6 +32,7 @@ void samplePower(int channel, int overSample){
   double _Irms = 0;
   double _watts = 0;
   double _Vrms = 0;
+  double _VA = 0;
 
   int16_t* VsamplePtr = Vsample;
   int16_t* IsamplePtr = Isample;
@@ -50,40 +52,41 @@ void samplePower(int channel, int overSample){
   int16_t rawI;  
   int32_t sumV = 0;
   int32_t sumI = 0;
-  int32_t sumP = 0;
-  int32_t sumVsq = 0;
-  int32_t sumIsq = 0;  
+  double sumP = 0;
+  double sumVsq = 0;
+  double sumIsq = 0;  
 
       // Determine phase correction components.
-      // stepCorrection is the number of I samples to add or subtract.
-      // stepFraction is the interpolation to apply to the next I sample (0.0 - 1.0)
-      // The phase correction is the net phase lead (+) of voltage computed as the 
-      // (VT lead - CT lead) + any gross phase correction for 3 phase measurement.
+      // stepCorrection is the number of V samples to add or subtract.
+      // stepFraction is the interpolation to apply to the next V sample (0.0 - 1.0)
+      // The phase correction is the net phase lead (+) of current computed as the 
+      // (CT lead - VT lead) - any gross phase correction for 3 phase measurement.
       // Note that a reversed CT can be corrected by introducing a 180deg gross correction.
 
-  float _phaseCorrection = (Vchannel->_phase - Ichannel->_phase) * samples / 360.0;  // fractional Isamples correction
-  int stepCorrection = int(_phaseCorrection);                                                // whole steps to correct 
-  float stepFraction = _phaseCorrection - stepCorrection;                                    // fractional step correction
-  if(stepFraction < 0){                                                                      // if current lead
-    stepCorrection--;                                                                        // One sample back
-    stepFraction += 1.0;                                                                     // and forward 1-fraction
+  float _phaseCorrection =  ( Ichannel->_phase - (Vchannel->_phase) -Ichannel->_vphase) * samples / 360.0;  // fractional Isamples correction
+  int stepCorrection = int(_phaseCorrection);                                        // whole steps to correct 
+  float stepFraction = _phaseCorrection - stepCorrection;                            // fractional step correction
+  if(stepFraction < 0){                                                              // if current lead
+    stepCorrection--;                                                                // One sample back
+    stepFraction += 1.0;                                                             // and forward 1-fraction
   }
 
   trace(T_POWER,3);
         // get sums, squares, and all that stuff.
-  Isample[samples] = Isample[0];      
-  int Iindex = (samples + stepCorrection) % samples;
+  Isample[samples] = Isample[0];
+  Vsample[samples] = Vsample[0];      
+  int Vindex = (samples + stepCorrection) % samples;
   for(int i=0; i<samples; i++){  
-    rawV = *VsamplePtr;
-    rawI = Isample[Iindex]; 
-    rawI += int(stepFraction * (Isample[Iindex + 1] - Isample[Iindex]));
+    rawI = *IsamplePtr;
+    rawV = Vsample[Vindex]; 
+    rawV += int(stepFraction * (Vsample[Vindex + 1] - Vsample[Vindex]));
     sumV += rawV;
     sumVsq += rawV * rawV;
     sumI += rawI;
     sumIsq += rawI * rawI;
     sumP += rawV * rawI;      
-    VsamplePtr++;
-    Iindex = (Iindex + 1) % samples;
+    IsamplePtr++;
+    Vindex = ++Vindex % samples;
   }
   
         // Adjust the offset values assuming symmetric waves but within limits otherwise.
@@ -92,7 +95,7 @@ void samplePower(int channel, int overSample){
   const uint16_t maxOffset = ADC_RANGE / 2 + ADC_RANGE / 200;
 
   trace(T_POWER,4);
-  if(sumV >= 0) sumV += samples / 2;
+  if(sumV >= 0) sumV += samples / 2; 
   else sumV -= samples / 2;
   int16_t offsetV = Vchannel->_offset + sumV / samples;
   if(offsetV < minOffset) offsetV = minOffset;
@@ -122,6 +125,8 @@ void samplePower(int channel, int overSample){
   _Vrms = Vratio * sqrt((double)(sumVsq / samples));
   _Irms = Iratio * sqrt((double)(sumIsq / samples));
   _watts = Vratio * Iratio * (double)(sumP / samples);
+  _VA = _Vrms * _Irms;
+  
 
         // If watts is negative and the channel is not explicitely signed, reverse it (backward CT).
         // If we do reverse it, and it's significant, mark it as such for reporting in the status API.
@@ -130,17 +135,15 @@ void samplePower(int channel, int overSample){
     Ichannel->_reversed = false;
     if(_watts < 0){
       _watts = -_watts;
-      if(_watts > 0.5){
+      if(_watts > 5){
         Ichannel->_reversed = true;
       }
     }
   }
-
       // Update with the new power and voltage values.
 
   trace(T_POWER,5);
-  Ichannel->setPower(_watts, _Irms);
-  Vchannel->setVoltage(_Vrms);
+  Ichannel->setPower(_watts, _VA);
   trace(T_POWER,9);                                                                               
   return;
 }
@@ -154,7 +157,7 @@ void samplePower(int channel, int overSample){
   *    
   *  The approach is to start sampling voltage/current pairs in a tight loop.
   *  When voltage crosses zero, we start recording the pairs.
-  *  When we have crossed zero cycles*2 more times we stop and return to compute the results.
+  *  When we  cross zero 2 more times we stop and return to compute the results.
   *  
   *  Note:  If ever there was a time for low-level hardware manipulation, this is it.
   *  the tighter and faster the samples can be taken, the more accurate the results can be.
@@ -163,12 +166,8 @@ void samplePower(int channel, int overSample){
   *  
   *  By manipulating the SPI chip select pin through hardware registers and
   *  running the SPI for only the required bits, again using the hardware 
-  *  registers, it's possinble to get about 500 sample pairs per cycle running
-  *  the SPI at 2MHz, which is the spec for the MCP3208 at 5v.
-  *  
-  *  The code supports both the MCP3008(10 bit) and MCP3208(12 bit) ADCs.
-  *  Although there is currently no way to configure the 3008, the support
-  *  here and elsewhere is low profile enough that it was left in.  
+  *  registers, it's possinble to get about 640 sample pairs per cycle (60Hz) running
+  *  the SPI at 2MHz, which is the spec for the MCP3208.
   *  
   *  I've tried to segregate the bit-banging and document it well.
   *  For anyone interested in the low level registers, you can find 
@@ -222,18 +221,8 @@ void samplePower(int channel, int overSample){
   uint32_t ADC_VselectMask = 1 << ADC_VselectPin;
   
   SPI.beginTransaction(SPISettings(2000000,MSBFIRST,SPI_MODE0));
-
-          // Make sure there is a voltage signal
  
-  lastV = readADC(Vchan) - offsetV;
-  do {
-    if((millis() - startMs) > 2){
-      return 2;
-    }
-    rawV = readADC(Vchan) - offsetV;   
-  } while(abs(rawV - lastV) < 20);
-  
-  *VsamplePtr = readADC(Vchan) - offsetV;             // Prime the pump
+  rawV = readADC(Vchan) - offsetV;                    // Prime the pump
   samples = 0;                                        // Start with nothing
 
           // Have at it.
@@ -260,8 +249,6 @@ void samplePower(int channel, int overSample){
           *IsamplePtr = (rawI + lastI) / 2;
           if(*IsamplePtr >= -1 && *IsamplePtr <= 1) *IsamplePtr = 0;
           lastI = rawI;
-                 
-          // if((*IsamplePtr > -3) && (*IsamplePtr < 3)) *IsamplePtr = 0;       // Filter noise from previous reading while SPI reads ADC  
               
           if(crossCount) {                                  // If past first crossing 
             VsamplePtr++;                                   // Accumulate samples
@@ -270,8 +257,8 @@ void samplePower(int channel, int overSample){
               samples++;
               if(samples >= MAX_SAMPLES){                   // If over the legal limit
                 trace(T_SAMP,0);                            // shut down and return
-                GPOS = ADC_IselectMask;                     // (Chip select high) 
-                Serial.println("Max samples exceeded.");       
+                GPOS = ADC_VselectMask;                     // (Chip select high) 
+                Serial.println(F("Max samples exceeded."));       
                 return 2;
               }
             }
@@ -313,9 +300,9 @@ void samplePower(int channel, int overSample){
             trace(T_SAMP,2);                                            // Leave a meaningful trace
             trace(T_SAMP,Ichan);
             trace(T_SAMP,Vchan);
-            GPOS = ADC_VselectMask;                                     // ADC select pin high 
-            Serial.print("Sample timeout: ");                                         
-            Serial.println(Ichan);                               
+            GPOS = ADC_IselectMask;                                     // ADC select pin high 
+            //Serial.print("Sample timeout: ");                                         
+            //Serial.println(Ichan);                               
             return 2;                                                   // Return a failure
           }
                               
@@ -330,7 +317,7 @@ void samplePower(int channel, int overSample){
    
        
         // Finish up loop cycle by checking for zero crossing.
-        // Crossing is defined by I and V having different signs (Xor) and crossGuard negative.
+        // Crossing is defined by voltage changing signs  (Xor) and crossGuard negative.
 
         if(((rawV ^ lastV) & crossGuard) >> 15) {        // If crossed unambiguously (one but not both Vs negative and crossGuard negative 
           startMs = millis();                            // Reset the cycle clock 
@@ -361,13 +348,15 @@ void samplePower(int channel, int overSample){
    
   trace(T_SAMP,8);
 
-  if(samples < ((lastCrossUs - firstCrossUs) * 10 / 264)){
-    Serial.print("Low sample count ");
+  if(samples < ((lastCrossUs - firstCrossUs) * 381 / 10000)){
+    Serial.print(F("Low sample count "));
     Serial.println(samples);
     return 1;
   }
-  
-          // Update damped frequency.
+  if(abs(samples - (midCrossSamples * 2)) > 3){
+    return 1;
+  }
+            // Update damped frequency.
 
   float Hz = 1000000.0  / float((uint32_t)(lastCrossUs - firstCrossUs));
   Vchannel->setHz(Hz);
@@ -416,7 +405,6 @@ float sampleVoltage(uint8_t Vchan, float Vcal){
   uint32_t sumVsq = 0;
   while(int rtc = sampleCycle(Vchannel, Vchannel, 1, 0)){
     if(rtc == 2){
-      Serial.println("Zero sample voltage");
       return 0.0;
     }
   }
@@ -473,7 +461,7 @@ void printSamples() {
   return;
 }
 
-float samplePhase(uint8_t Vchan, uint8_t Ichan, uint16_t Ishift){
+String samplePhase(uint8_t Vchan, uint8_t Ichan, uint16_t Ishift){
   
   int16_t cycles = 1;
     
@@ -482,34 +470,42 @@ float samplePhase(uint8_t Vchan, uint8_t Ichan, uint16_t Ishift){
   
   int16_t rawV;                               // Raw ADC readings
   int16_t rawI;
-    
+
+  double IshiftDeg = (double)Ishift * 360.0 / (samples / cycles);  
   double sumVsq = 0;
   double sumIsq = 0;
   double sumVI = 0;
+  float  sumSamples;
 
-  sampleCycle(Vchannel, Ichannel, cycles, Ishift);
-  PRINTL("samples: ",samples)
-  PRINTL("Vsample[0]: ", Vsample[0])
-  PRINTL("Vsample[1]: ", Vsample[1])
-  PRINTL("Vsample[n-1]: ", Vsample[samples-1])
-  PRINTL("Vsample[n]: ", Vsample[samples])
-
-  double IshiftDeg = (double)Ishift * 360.0 / (samples / cycles);
-  PRINTL("ShiftDeg: ", IshiftDeg) 
-
-  for(int i=0; i<samples; i++){
-    sumVsq += Vsample[i] * Vsample[i];
-    sumIsq += Isample[(i + Ishift) % samples] * Isample[(i + Ishift) % samples];
-    sumVI += Vsample[i] * Isample[(i + Ishift) % samples];
+  for(int i=0; i<4; i++){
+    uint32_t startTime = millis();
+    while (sampleCycle(Vchannel, Ichannel, cycles, Ishift)){
+      if(millis()-startTime > 75){
+        return String("Unable to sample");
+      }
+    }
+    for(int i=0; i<samples; i++){
+      sumVsq += Vsample[i] * Vsample[i];
+      sumIsq += Isample[(i + Ishift) % samples] * Isample[(i + Ishift) % samples];
+      sumVI += Vsample[i] * Isample[(i + Ishift) % samples];
+    }
+    sumSamples += samples;
   }
 
   double Vrms = sqrt(sumVsq / (double)samples);
   double Irms = sqrt(sumIsq / (double)samples);
   double VI = sumVI / (double)samples;
+  float phaseDiff = (double)57.29578 * acos(VI / (Vrms * Irms)) - 0.055;  // 0.055 is shift introduced in sampling timing
 
-  float phaseDiff = (double)57.29578 * acos(VI / (Vrms * Irms)) - IshiftDeg;
-  PRINTL("phaseDiff: ",phaseDiff)
-  return phaseDiff;
+  String response = "Sample phase lead\r\n\r\nChannel: " + String(Ichan) + "\r\n";
+  response += "Refchan: " + String(Vchan) + "\r\n";
+  if(Ishift){
+    response += "Measured shift: " + String(phaseDiff,2) + " degrees\r\n";
+    response += "Artificial shift: " + String(IshiftDeg,2) + " degrees (" + String(Ishift) + ") samples\r\n";
+  }
+  response += "Net shift: " + String(phaseDiff-IshiftDeg,2) + " degrees\r\n\r\n";
+  
+  return response;
 }
 
 

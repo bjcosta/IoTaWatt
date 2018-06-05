@@ -15,8 +15,8 @@ void setup()
    
   Serial.begin(115200);
   delay(250);
-  Serial.println(F("\r\n\n\n** Restart **\r\n\n"));
-  Serial.println(F("Serial Initialized"));
+  //Serial.println(F("\r\n\n\n** Restart **\r\n\n"));
+  //Serial.println(F("Serial Initialized"));
   
   //*************************************** Start SPI *************************************************
     
@@ -34,12 +34,12 @@ void setup()
   
   SPI.begin();
   SPI.beginTransaction(SPISettings(2000000,MSBFIRST,SPI_MODE0));
-  msgLog(F("SPI started."));
+  Serial.println("\r\nSPI started.");
    
   //*************************************** Initialize the SD card ************************************
 
   if(!SD.begin(pin_CS_SDcard)) {
-    msgLog(F("SD initiatization failed. Retrying."));
+    log("SD initiatization failed. Retrying.");
     setLedCycle("G.R.R...");
     while(!SD.begin(pin_CS_SDcard, SPI_FULL_SPEED)){ 
       yield();
@@ -47,16 +47,13 @@ void setup()
     endLedCycle();
     digitalWrite(greenLed,HIGH); 
   }
-  msgLog(F("SD initialized."));
   hasSD = true;
+  log("SD initialized.");
 
   //*************************************** Check RTC   *****************************
 
   Wire.begin(pin_I2C_SDA, pin_I2C_SCL);
   rtc.begin();
-
-
-
 
   Wire.beginTransmission(PCF8523_ADDRESS);            // Read Control_3
   Wire.write((byte)2);
@@ -68,9 +65,9 @@ void setup()
     timeRefNTP = rtc.now().unixtime() + SEVENTY_YEAR_SECONDS;
     timeRefMs = millis();
     RTCrunning = true;
-    msgLog("Real Time Clock is running. Unix time: ", UNIXtime());
+    log("Real Time Clock is running. Unix time %d ", UNIXtime());
     if((Control_3 & 0x08) != 0){
-      msgLog(F("Power failure detected."));
+      log("Power failure detected.");
       Wire.beginTransmission(PCF8523_ADDRESS);            
       Wire.write((byte)PCF8523_CONTROL_3);
       Wire.write((byte)0);
@@ -79,7 +76,7 @@ void setup()
     SdFile::dateTimeCallback(dateTime);
   }
   else {
-    msgLog(F("Real Time Clock not initialized."));
+    log("Real Time Clock not initialized.");
   }
   programStartTime = UNIXtime();
   
@@ -90,25 +87,29 @@ void setup()
 
   //**************************************** Display software version *********************************
 
-  msgLog("Version: ", IOTAWATT_VERSION);
+  log("Version %s", IOTAWATT_VERSION);
 
   copyUpdate(String(IOTAWATT_VERSION));
   
   //**************************************** Display the trace ****************************************
 
-  msgLog("Reset reason: ",(const char*)ESP.getResetReason().c_str());
+  log("Reset reason: %s", ESP.getResetReason().c_str());
   logTrace();
-  msgLog("ESP8266 ChipID:",ESP.getChipId());
+  log("ESP8266 ChipID: %d",ESP.getChipId());
+
+  // ****************************************** Flush the trace ************************************
+
+  traceEntry.seq = 0;
+  for(int i=0; i<32; i++) trace(0,0);
 
 //************************************* Process Config file *****************************************
   
   if(!getConfig()) {
-    msgLog(F("Configuration failed"));
+    log("Configuration failed");
     dropDead();
   }
-  String msg = "device name: " + deviceName + ", version: " + String(deviceVersion); 
-  msgLog(msg);
-  msgLog("Local time zone: ",String(localTimeDiff));
+  log("Local time zone: %d", localTimeDiff);
+  log("device name: %s, version: %d", deviceName, deviceVersion);
 
 //*************************************** Start the WiFi  connection *****************************
   
@@ -123,12 +124,12 @@ void setup()
       wifiManager.setConfigPortalTimeout(180);
       String ssid = "iota" + String(ESP.getChipId());
       String pwd = deviceName;
-      msgLog(F("Connecting with WiFiManager."));
+      log("Connecting with WiFiManager.");
 
       wifiManager.autoConnect(ssid.c_str(), pwd.c_str());
       endLedCycle();
       while(WiFi.status() != WL_CONNECTED && RTCrunning == false){
-        msgLog(F("RTC not running, waiting for WiFi."));
+        log("RTC not running, waiting for WiFi.");
         setLedCycle("R.R.G...");
         wifiManager.setConfigPortalTimeout(3600);
         wifiManager.autoConnect(ssid.c_str(), pwd.c_str());
@@ -139,44 +140,26 @@ void setup()
     yield();
   }
   if(WiFi.status() != WL_CONNECTED){
-    msgLog(F("No WiFi connection."));
+    log("No WiFi connection.");
   }
-
-  //**************************************** Check for pending update ********************************
-
-  if(checkUpdate()){
-    msgLog(F("Firmware updated, restarting"));
-    delay(500);
-    ESP.restart();
-  }  
     
   //*************************************** Start the local DNS service ****************************
 
   if (MDNS.begin(host.c_str())) {
       MDNS.addService("http", "tcp", 80);
-      msgLog(F("MDNS responder started"));
-      msgLog(String("You can now connect to http://" + String(host) + ".local"));
+      log("MDNS responder started");
+      log("You can now connect to http://%s.local", host.c_str());
   }
    
  //*************************************** Start the web server ****************************
 
-  server.on("/status",HTTP_GET, handleStatus);
-  server.on("/vcal",HTTP_GET, handleVcal);
-  server.on("/command", HTTP_GET, handleCommand);
-  server.on("/list", HTTP_GET, printDirectory);
-  server.on("/config",HTTP_GET, handleGetConfig);
-  server.on("/edit", HTTP_DELETE, handleDelete);
-  server.on("/edit", HTTP_PUT, handleCreate);
-  server.on("/edit", HTTP_POST, returnOK, handleFileUpload);
-  server.onNotFound(handleNotFound);
-
   SdFile::dateTimeCallback(dateTime);
-
+  server.on(F("/edit"), HTTP_POST, returnOK,  handleFileUpload);
+  server.onNotFound(handleRequest);
   server.begin();
-  msgLog(F("HTTP server started"));
+  log("HTTP server started");
   WiFi.mode(WIFI_STA);
   
-
  //*************************************** Start the logging services *********************************
    
   NewService(dataLog);
@@ -184,26 +167,14 @@ void setup()
   NewService(timeSync);
   NewService(WiFiService);
   NewService(updater);
-  
+  NewService(historyLog);
   
 }  // setup()
 /***************************************** End of Setup **********************************************/
 
-
-String formatHex(uint32_t data){
-  const char* hexDigits = "0123456789ABCDEF";
-  String str = "00000000";
-  uint32_t _data = data;
-  for(int i=7; i>=0; i--){
-    str[i] = hexDigits[_data % 16];
-    _data /= 16;
-  }
-  return str;
-}
-
 void dropDead(void){dropDead("R.R.R...");}
 void dropDead(const char* pattern){
-  msgLog(F("Program halted."));
+  log("Program halted.");
   setLedCycle(pattern);
   while(1){
     delay(1000);   

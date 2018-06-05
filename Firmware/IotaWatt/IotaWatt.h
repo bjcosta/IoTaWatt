@@ -19,7 +19,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.  
    
 ***********************************************************************************/
-#define IOTAWATT_VERSION "02_02_23"
+#define IOTAWATT_VERSION "02_03_06"
 
 #define PRINT(txt,val) Serial.print(txt); Serial.print(val);      // Quick debug aids
 #define PRINTL(txt,val) Serial.print(txt); Serial.println(val);
@@ -32,9 +32,11 @@
 #include <ESP8266mDNS.h>
 #include <DNSServer.h>
 #include <WiFiClient.h>
-#include <ESP8266HTTPClient.h>
+//#include <ESP8266HTTPClient.h>
 #include <ESP8266WebServer.h>
-#include <ESP8266httpUpdate.h>
+//#include <ESP8266httpUpdate.h>
+#include <ESPAsyncTCP.h>
+#include <asyncHTTPrequest.h>
 
 #include <SPI.h>
 #include <RTClib.h>
@@ -54,10 +56,14 @@
 #include <SHA256.h>
 #include <Ed25519.h>
 
-#include "msgLog.h"
+#include "messageLog.h"
+#include "utilities.h"
 #include "webServer.h"
 #include "updater.h"
 #include "samplePower.h"
+#include "influxDB.h"
+#include "Emonservice.h"
+
 
       // Declare instances of major classes
 
@@ -65,25 +71,23 @@ extern WiFiClient WifiClient;
 extern WiFiManager wifiManager;
 extern ESP8266WebServer server;
 extern DNSServer dnsServer;
-extern IotaLog iotaLog;
+extern IotaLog currLog;
+extern IotaLog histLog;
 extern RTC_PCF8523 rtc;
 extern Ticker ticker;
-extern CBC<AES128> cypher;
-extern SHA256 sha256;
-extern HTTPClient http;
-extern MD5Builder md5;
+extern messageLog msglog;
 
 #define MS_PER_HOUR   3600000UL
 #define SEVENTY_YEAR_SECONDS  2208988800UL
 
       // Declare filename Strings of system files.
 
-extern String deviceName;
-extern String IotaLogFile;
-extern String IotaMsgLog;
-extern String EmonPostLogFile;
-extern String influxPostLogFile;
-extern String pvoutputPostLogFile;
+extern char* deviceName;
+extern const char* IotaLogFile;
+extern const char* historyLogFile;
+extern const char* IotaMsgLog;
+extern const char*  ntpServerName;
+extern const char* pvoutputPostLogFile;
 extern uint16_t deviceVersion;
 
         // Define the hardware pins
@@ -100,26 +104,47 @@ extern uint16_t deviceVersion;
 
 extern uint8_t ADC_selectPin[2];            // indexable reference for ADC select pins
 
+      // Trace context and work area
+
+union traceUnion {
+      uint32_t    traceWord;
+      struct {
+            uint16_t    seq;
+            uint8_t     mod;
+            uint8_t     id;
+      };
+};
+
+extern traceUnion traceEntry;
+
       // Identifiers used to construct id numbers for graph API
 
 #define QUERY_VOLTAGE  1
 #define QUERY_POWER  2
 #define QUERY_ENERGY 3
+#define QUERY_OTHER 4
 
      // RTC trace trace module values by module. (See trace routines in Loop tab)
 
-#define T_LOOP 10           // Loop
-#define T_LOG 20            // dataLog
-#define T_Emon 30           // EmonService
-#define T_GFD 40            // GetFeedData
-#define T_UPDATE 50         // updater
-#define T_SETUP 60          // Setup
-#define T_influx 70         // influxDB
-#define T_SAMP 80           // sampleCycle
-#define T_POWER 90          // Sample Power
-#define T_WEB 100           // (30)Web server handlers
-#define T_CONFIG 130        //  Get Config
-#define T_pvoutput 140      // pvoutput
+#define T_LOOP 1           // Loop
+#define T_LOG 2            // dataLog
+#define T_Emon 3           // EmonService
+#define T_GFD 4            // GetFeedData
+#define T_UPDATE 5         // updater
+#define T_SETUP 6          // Setup
+#define T_influx 7         // influxDB
+#define T_SAMP 8           // sampleCycle
+#define T_POWER 9          // Sample Power
+#define T_WEB 10           // (30)Web server handlers
+#define T_CONFIG 11        //  Get Config
+#define T_encryptEncode 12 //  base64encode and encryptData in EmonService
+#define T_uploadGraph 13 
+#define T_history 14
+#define T_base64 15        // base 64 encode
+#define T_EmonConfig 16    // Emon configuration
+#define T_influxConfig 17  // influx configuration 
+#define T_stats 18         // Stat service                      
+#define T_pvoutput 19      // pvoutput
 
       // ADC descriptors
 
@@ -149,7 +174,7 @@ extern serviceBlock* serviceQueue;     // Head of ordered list of services
       // Can be specified in config.device.aref
       // Voltage adjustments are the values for AC reference attenuation in IotaWatt 2.1.
 
-#define MAXINPUTS 15                          // Arbitrary compile time limit for input channels
+#define MAXINPUTS 15                          // Compile time input channels, can't be changed easily 
 extern IotaInputChannel* *inputChannel;       // -->s to incidences of input channels (maxInputs entries)
 extern uint8_t  maxInputs;                    // channel limit based on configured hardware (set in Config)
 extern float    VrefVolts;                    // Voltage reference shunt value used to calibrate
@@ -166,7 +191,7 @@ extern float   frequency;                             // Split the difference to
 extern float   samplesPerCycle;                       // Here as well
 extern float   cycleSampleRate;
 extern int16_t cycleSamples;
-extern dataBuckets statBucket[MAXINPUTS];
+extern IotaLogRecord statRecord;
 
       // ****************************** list of output channels **********************
 
@@ -178,87 +203,42 @@ extern ScriptSet* outputs;
 extern String   host;
 extern bool     hasSD;
 extern File     uploadFile;
+extern SHA256*  uploadSHA;  
 extern boolean  serverAvailable;          // Set false when asynchronous handler active to avoid new requests
 extern boolean  wifiConnected;
 extern uint8_t  configSHA256[32];         // Hash of config file
 
+extern int16_t  HTTPrequestMax;           // Maximum concurrent HTTP requests
+extern int16_t  HTTPrequestFree;          // Request semaphore
+
       // ****************************** Timing and time data *************************
 #define  SEVENTY_YEAR_SECONDS 2208988800UL
 extern int      localTimeDiff;
-extern uint32_t programStartTime;;               // Time program started (UnixTime)
-extern uint32_t timeRefNTP;  // Last time from NTP server (NTPtime)
+extern uint32_t programStartTime;;             // Time program started (UnixTime)
+extern uint32_t timeRefNTP;                    // Last time from NTP server (NTPtime)
 extern uint32_t timeRefMs;                     // Internal MS clock corresponding to timeRefNTP
-extern uint32_t timeSynchInterval;           // Interval (sec) to roll NTP forward and try to refresh
-extern uint32_t dataLogInterval;               // Interval (sec) to invoke dataLog
+extern uint32_t timeSynchInterval;             // Interval (sec) to roll NTP forward and try to refresh
 extern uint32_t EmonCMSInterval;               // Interval (sec) to invoke EmonCMS
 extern uint32_t influxDBInterval;              // Interval (sec) to invoke inflexDB
 extern uint32_t statServiceInterval;           // Interval (sec) to invoke statService
-extern uint32_t updaterServiceInterval;     // Interval (sec) to check for software updates
+extern uint32_t updaterServiceInterval;        // Interval (sec) to check for software updates
 extern uint32_t pvoutputReportInterval;        // Interval (sec) to invoke pvoutput
 
 extern bool     hasRTC;
 extern bool     RTCrunning;
 
-extern char     ledColor[12];                         // Pattern to display led, each char is 500ms color - R, G, Blank
-extern uint8_t  ledCount;                             // Current index into cycle
+extern char     ledColor[12];                   // Pattern to display led, each char is 500ms color - R, G, Blank
+extern uint8_t  ledCount;                       // Current index into cycle
 
       // ****************************** Firmware update ****************************
-extern String   updateURL;
-extern String   updateURI;
-extern String   updateClass;            // NONE, MAJOR, MINOR, BETA, ALPHA, TEST
-extern uint8_t  publicKey[32];
-
-      // *********************** EmonCMS configuration stuff *************************
-      // Note: nee dto move out to a class and change for dynamic configuration
-      // Start stop is a kludge for now.
-
-extern bool     EmonStarted;                      // set true when Service started
-extern bool     EmonStop;                         // set true to stop the Service
-extern bool     EmonInitialize;                   // Initialize or reinitialize EmonService
-extern String   EmonURL;                          // These are set from the config file
-extern String   EmonURI;
-extern String   apiKey;
-extern uint8_t  cryptoKey[16];
-extern String   node;
-extern boolean  EmonSecure;
-extern String   EmonUsername;
-extern int16_t  EmonBulkSend;
-enum EmonSendMode {
-  EmonSendGET = 1,
-  EmonSendPOSTsecure = 2
-};
-extern EmonSendMode EmonSend;
-extern ScriptSet* emonOutputs;
-
-      //********************** influxDB configuration stuff *****************************//
-      // again, need to move this stuff to a class.
-
-extern bool     influxStarted;                    // set true when Service started
-extern bool     influxStop;                       // set true to stop the Service
-extern bool     influxInitialize;                 // Initialize or reinitialize
-extern String   influxURL;
-extern uint16_t influxPort;
-extern String   influxDataBase;
-extern int16_t  influxBulkSend;
-extern ScriptSet* influxOutputs;
-
-
-
-//********************** pvoutput configuration stuff *****************************//
-// again, need to move this stuff to a class.
-#define DEFAULT_PVOUTPUT_INTERVAL (5*60)
-extern bool     pvoutputStarted;                    // set true when Service started
-extern bool     pvoutputStop;                       // set true to stop the Service
-extern bool     pvoutputInitialize;                 // Initialize or reinitialize
-extern String   pvoutputApiKey;
-extern int      pvoutputSystemId;
-extern int      pvoutputMainsChannel;
-extern int      pvoutputSolarChannel;
-extern unsigned int pvoutputHTTPTimeout;
+extern const char*    updateURL;
+extern const char*    updatePath;
+extern char*          updateClass;            // NONE, MAJOR, MINOR, BETA, ALPHA, TEST
+extern const uint8_t  publicKey[32];
 
       // ************************ ADC sample pairs ************************************
 
-#define MAX_SAMPLES 1000
+#define MAX_SAMPLES 900
 extern int16_t samples;                           // Number of samples taken in last sampling
 extern int16_t Vsample [MAX_SAMPLES];             // voltage/current pairs during sampling
 extern int16_t Isample [MAX_SAMPLES];
@@ -266,12 +246,13 @@ extern int16_t Isample [MAX_SAMPLES];
       // ************************ Declare global functions
 void      setup();
 void      loop();
-void      trace(uint32_t, int);
+void      trace(const uint8_t module, const uint8_t id); 
 void      logTrace(void);
 
 void      NewService(uint32_t (*serviceFunction)(struct serviceBlock*));
 void      AddService(struct serviceBlock*);
 uint32_t  dataLog(struct serviceBlock*);
+uint32_t  historyLog(struct serviceBlock*);
 uint32_t  statService(struct serviceBlock*);
 uint32_t  EmonService(struct serviceBlock*);
 uint32_t  influxService(struct serviceBlock*);
@@ -279,7 +260,9 @@ uint32_t  pvoutputService(struct serviceBlock*);
 uint32_t  timeSync(struct serviceBlock*);
 uint32_t  updater(struct serviceBlock*);
 uint32_t  WiFiService(struct serviceBlock*);
-uint32_t  handleGetFeedData(struct serviceBlock*);
+uint32_t  getFeedData(struct serviceBlock*);
+
+uint32_t  logReadKey(IotaLogRecord* callerRecord);
 
 void      setLedCycle(const char*);
 void      endLedCycle();
@@ -293,11 +276,10 @@ uint32_t  NTPtime();
 uint32_t  UNIXtime();
 uint32_t  MillisAtUNIXtime(uint32_t);
 void      dateTime(uint16_t* date, uint16_t* time);
+String    timeString(int value);
 
 boolean   getConfig(void);
 
 void      sendChunk(char* bufr, uint32_t bufrPos);
-String    base64encode(const uint8_t* in, size_t len);
 
-String    formatHex(uint32_t);
 #endif

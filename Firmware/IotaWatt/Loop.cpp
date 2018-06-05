@@ -15,13 +15,13 @@ void loop()
 
   // ------- If AC zero crossing approaching, go sample a channel.
 
-  if((uint32_t)(millis() - lastCrossMs) >= (490 / int(frequency))){
+  if((uint32_t)(millis() - lastCrossMs) >= (430 / int(frequency))){
     ESP.wdtFeed();
     trace(T_LOOP,1);
     samplePower(nextChannel, 0);
     trace(T_LOOP,2);
     nextCrossMs = lastCrossMs + 490 / int(frequency);
-    while( ! inputChannel[++nextChannel % maxInputs]);
+    while( ! inputChannel[++nextChannel % maxInputs]->isActive());
     nextChannel = nextChannel % maxInputs;
   }
 
@@ -48,24 +48,14 @@ void loop()
     ESP.wdtFeed();
     trace(T_LOOP,5);
     thisBlock->callTime = thisBlock->service(thisBlock);
+    yield();
     trace(T_LOOP,6);
     if(thisBlock->callTime > 0){
       AddService(thisBlock); 
     } else {
       delete thisBlock;    
     }
-  }
-
-// ----------- Another shout out to the Web 
-     
-  yield();
-  ESP.wdtFeed();
-  if(serverAvailable){
-    trace(T_LOOP,7);
-    server.handleClient();
-    trace(T_LOOP,8);
-    yield();
-  }
+  } 
 }
 
 /*****************************************************************************************************
@@ -134,45 +124,6 @@ void AddService(struct serviceBlock* newBlock){
   }
 }
 
-/******************************************************************************************************** 
- * All of the other SERVICEs that harvest values from the main "buckets" do so for their own selfish 
- * purposes, and have no global scope to share with others. This simple service maintains periodic
- * values for each of the buckets in a global set of buckets called statBucket.  It also is where 
- * status statistics like sample rates are maintained.  
- *******************************************************************************************************/
-
-uint32_t statService(struct serviceBlock* _serviceBlock) { 
-  static uint32_t timeThen = millis();        
-  static boolean started = false;
-  static float damping = .5;
-  uint32_t timeNow = millis();
-
-  if(!started){
-    msgLog(F("statService: started."));
-    started = true;
-    for(int i=0; i<maxInputs; i++){
-      statBucket[i].accum1 = inputChannel[i]->dataBucket.accum1;
-      statBucket[i].accum2 = inputChannel[i]->dataBucket.accum2;
-    }
-    return (uint32_t)UNIXtime() + 1;
-  }
-  
-  double elapsedHrs = double((uint32_t)(timeNow - timeThen)) / MS_PER_HOUR;
-  for(int i=0; i<maxInputs; i++){
-    inputChannel[i]->ageBuckets(timeNow); 
-    statBucket[i].value1 = (damping * statBucket[i].value1) + ((1.0 - damping) * (inputChannel[i]->dataBucket.accum1 - statBucket[i].accum1) / elapsedHrs);
-    statBucket[i].value2 = (damping * statBucket[i].value2) + ((1.0 - damping) * (inputChannel[i]->dataBucket.accum2 - statBucket[i].accum2) / elapsedHrs);
-    statBucket[i].accum1 = inputChannel[i]->dataBucket.accum1;
-    statBucket[i].accum2 = inputChannel[i]->dataBucket.accum2;
-  }
-  
-  cycleSampleRate = damping * cycleSampleRate + (1.0 - damping) * float(cycleSamples * 1000) / float((uint32_t)(timeNow - timeThen));
-  cycleSamples = 0;
-  timeThen = timeNow;
-  
-  return ((uint32_t)UNIXtime() + statServiceInterval);
-}
-
 /************************************************************************************************
  *  Program Trace Routines.
  *  
@@ -184,26 +135,25 @@ uint32_t statService(struct serviceBlock* _serviceBlock) {
  *  RTC_USER_MEM area.  After a restart, the 32 most recent entries are logged, oldest to most rent, 
  *  using logTrace.
  *************************************************************************************************/
-
-void trace(uint32_t module, int seq){
-  static uint16_t traceSeq = 0;
-  static uint32_t entry;
-  entry = (module+seq) | (traceSeq++ << 16);
-  WRITE_PERI_REG(RTC_USER_MEM + 96 + (traceSeq & 0x1F), entry);
+void trace(const uint8_t module, const uint8_t id){
+  traceEntry.seq++;
+  traceEntry.mod = module;
+  traceEntry.id = id;
+  WRITE_PERI_REG(RTC_USER_MEM + 96 + (traceEntry.seq & 0x1F), (uint32_t) traceEntry.traceWord);
 }
 
 void logTrace(void){
-  uint16_t _counter = READ_PERI_REG(RTC_USER_MEM + 96) >> 16;
-  int i = 1;
-  while(((uint16_t)++_counter) == (READ_PERI_REG(RTC_USER_MEM + 96 + (i%32)) >> 16)) i++;
-  String line = "Trace: ";
+  traceEntry.traceWord = READ_PERI_REG(RTC_USER_MEM + 96);
+  uint16_t _counter = traceEntry.seq;
+  int i = 0;
+  do {
+    traceEntry.traceWord = READ_PERI_REG(RTC_USER_MEM + 96 + (++i%32));
+  } while(++_counter == traceEntry.seq);
+  String line = "";
   for(int j=0; j<32; j++){
-    uint32_t _entry = READ_PERI_REG(RTC_USER_MEM + 96 + ((j+i)%32)) & 0xFFFF;
-    line += String(_entry) + ",";
+    traceEntry.traceWord = READ_PERI_REG(RTC_USER_MEM + 96 + ((j+i)%32));
+    line += ' ' + String(traceEntry.mod) + ':' + String(traceEntry.id) + ',';
   }
   line.remove(line.length()-1);  
-  msgLog(line);
+  log("Trace: %s", line.c_str());
 }
-
-
- 

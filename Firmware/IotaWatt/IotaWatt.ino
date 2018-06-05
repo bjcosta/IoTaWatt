@@ -44,7 +44,7 @@
  *   07/19/17 2.02.04 Changes to Emoncms support 
  *   07/19/17 2.02.05 Bump version
  *   07/19/17 2.02.06 Accept Emoncms or Emoncms (compatibility)
- *   07/23/17 2.02.07 Overhaul RTC initialization and power fail logging
+ *   07/23/17 2.02.07 Overhaul RTC initialization and power fail logging 
  *   07/23/17 2.02.08 Add LED problem indicators during startup
  *   07/23/17 2.02.09 Add LED indication of connection and timer status
  *   08/07/17 2.02.10 Add Emonpi URL support
@@ -61,6 +61,19 @@
  *   10/13/17 02_02_21 New release for production 
  *   10/18/17 02_02_22 Recompile with staged core to fix Krack vulnerability
  *   10/28/17 02_02_23 Fix several problems encountered using new arduino core 
+ *   11/03/17 02_02_24 Improve error handling Emoncms, change API to use I/O channel names
+ *   11/08/17 02_02_25 Rework data log into current and history logs 
+ *   11/11/17 02_02_26 Fix bug in searchKey, improve searchKey, throttle back historyLog Service 
+ *   12/05/17 02_02_27 Emoncms context from Emoncms, Rework config app 
+ *   01/14/18 02_02_28 Add derived three-phase support 
+ *   01/23/18 02_02_29 Improved phase correction plus misc. fixes  
+ *   02/08/18 02_02_30 Bump version to release with tables.txt filename fixed
+ *   03/01/18 02_03_01 AsyncHTTP 
+ *   03/20/18 02_03_02 New influDB support, allow multiple upload services
+ *   03/29/18 02_03_03 Units computation in calculator, heap management improvements
+ *   03/30/18 02_03_04 Punchlist, fix memory loak in getConfig, build server payload at bulk maturation
+ *   04/15/18 02_03_05 Rework influxDB support with variables and double buffering 
+ *   05/16/18 02_03_06 Reimpliment messagelog, upgrade to 2.4.1 core and lwip 2
  * 
  *****************************************************************************************************/
 
@@ -69,27 +82,28 @@
 WiFiClient WifiClient;
 WiFiManager wifiManager;
 DNSServer dnsServer;    
-IotaLog iotaLog;                            // instance of IotaLog class
+IotaLog currLog(5,400);                     // current data log  (1.1 years) 
+IotaLog histLog(60,4000);                   // history data log  (11 years)  
 RTC_PCF8523 rtc;                            // Instance of RTC_PCF8523
 Ticker ticker;
-CBC<AES128> cypher;
-SHA256 sha256;
-HTTPClient http;
-MD5Builder md5;
+messageLog msglog;
 
       // Define filename Strings of system files.          
 
-String deviceName = "IotaWatt";             
-String IotaLogFile = "/IotaWatt/IotaLog";
-String IotaMsgLog = "/IotaWatt/IotaMsgs.txt";
-String EmonPostLogFile = "/iotawatt/Emonlog.log";
-String influxPostLogFile = "/iotawatt/influxdb.log";
-String pvoutputPostLogFile = "/iotawatt/pvoutput.log";
+char* deviceName;             
+const char* IotaLogFile = "/IotaWatt/IotaLog";
+const char* historyLogFile = "/IotaWatt/histLog";
+const char* IotaMsgLog = "/IotaWatt/IotaMsgs.txt";
+const char* ntpServerName = "pool.ntp.org";
 
                        
 uint8_t ADC_selectPin[2] = {pin_CS_ADC0,    // indexable reference for ADC select pins
                             pin_CS_ADC1};  
 
+
+      // Trace context and work area
+
+traceUnion traceEntry;
 
       /**************************************************************************************************
        * Core dispatching parameters - There's a lot going on, but the steady rhythm is sampling the
@@ -124,7 +138,7 @@ float   frequency = 55;                  // Split the difference to start
 float   samplesPerCycle = 550;           // Here as well
 float   cycleSampleRate = 0;
 int16_t cycleSamples = 0;
-dataBuckets statBucket[MAXINPUTS];
+IotaLogRecord statRecord;                 // Maintained by statService with real-time values
 
       // ****************************** SDWebServer stuff ****************************
 
@@ -133,18 +147,23 @@ ESP8266WebServer server(80);
 String  host = "IotaWatt";
 bool    hasSD = false;
 File    uploadFile;
+SHA256* uploadSHA;
 boolean serverAvailable = true;   // Set false when asynchronous handler active to avoid new requests
 boolean wifiConnected = false;
 uint8_t configSHA256[32];         // Hash of config file last time read or written
 
-      // ****************************** Timing and time data *************************
+      // ************************** HTTP concurrent request semaphore *************************
+
+int16_t  HTTPrequestMax = 2;      // Maximum number of concurrent HTTP requests        
+int16_t  HTTPrequestFree = 2;     // Request semaphore 
+
+      // ****************************** Timing and time data **********************************
 
 int      localTimeDiff = 0;                  // Hours from UTC 
 uint32_t programStartTime = 0;               // Time program started (UnixTime)
 uint32_t timeRefNTP = SEVENTY_YEAR_SECONDS;  // Last time from NTP server (NTPtime)
 uint32_t timeRefMs = 0;                      // Internal MS clock corresponding to timeRefNTP
 uint32_t timeSynchInterval = 3600;           // Interval (sec) to roll NTP forward and try to refresh
-uint32_t dataLogInterval = 5;                // Interval (sec) to invoke dataLog
 uint32_t EmonCMSInterval = 10;               // Interval (sec) to invoke EmonCMS
 uint32_t influxDBInterval = 10;              // Interval (sec) to invoke inflexDB 
 uint32_t pvoutputReportInterval = DEFAULT_PVOUTPUT_INTERVAL; // Interval (sec) to invoke pvoutput
@@ -159,62 +178,18 @@ uint8_t  ledCount;                           // Current index into cycle
 
       // ****************************** Firmware update ****************************
       
-String   updateURL = "iotawatt.com";
-String   updateURI = "/firmware/iotaupdt.php";
-String   updateClass = "NONE";              // NONE, MAJOR, MINOR, BETA, ALPHA, TEST    
-uint8_t  publicKey[32] = {0x7b, 0x36, 0x2a, 0xc7, 0x74, 0x72, 0xdc, 0x54,
-                         0xcc, 0x2c, 0xea, 0x2e, 0x88, 0x9c, 0xe0, 0xea,
-                         0x3f, 0x20, 0x5a, 0x78, 0x22, 0x0c, 0xbc, 0x78,
-                         0x2b, 0xe6, 0x28, 0x5a, 0x21, 0x9c, 0xb7, 0xf3}; 
-
-      // *********************** EmonCMS configuration stuff *************************
-      // Note: need to move out to a class and change for dynamic configuration
-      // Start stop is a kludge for now.
-      
-bool      EmonStarted = false;                    // set true when Service started
-bool      EmonStop = false;                       // set true to stop the Service
-bool      EmonInitialize = true;                  // Initialize or reinitialize EmonService                                         
-String    EmonURL;                                // These are set from the config file 
-String    EmonURI = "";
-String    apiKey;
-uint8_t   cryptoKey[16];
-String    node = "IotaWatt";
-boolean   EmonSecure = false;
-String    EmonUsername;
-int16_t   EmonBulkSend = 1;
-EmonSendMode EmonSend = EmonSendPOSTsecure;
-ScriptSet* emonOutputs;
-
-      //********************** influxDB configuration stuff *****************************//
-      // again, need to move this stuff to a class.
-
-bool      influxStarted = false;                    // set true when Service started
-bool      influxStop = false;                       // set true to stop the Service
-bool      influxInitialize = true;                  // Initialize or reinitialize 
-String    influxURL = "167.114.114.94";
-uint16_t  influxPort = 8086;
-String    influxDataBase = "test";
-int16_t   influxBulkSend = 1;
-ScriptSet* influxOutputs;      
-
-
-//********************** pvoutput configuration stuff *****************************//
-// again, need to move this stuff to a class.
-
-bool      pvoutputStarted = false;                    // set true when Service started
-bool      pvoutputStop = false;                       // set true to stop the Service
-bool      pvoutputInitialize = true;                  // Initialize or reinitialize 
-String    pvoutputApiKey = "";
-int       pvoutputSystemId = 0;
-int       pvoutputMainsChannel = 0;
-int       pvoutputSolarChannel = 0;
-extern unsigned int pvoutputHTTPTimeout = 2000;
+const char* updateURL = "iotawatt.com";
+const char* updatePath = "/firmware/iotaupdt.php";
+char*    updateClass = nullptr;              // NONE, MAJOR, MINOR, BETA, ALPHA, TEST    
+const uint8_t publicKey[32] PROGMEM = {
+                        0x7b, 0x36, 0x2a, 0xc7, 0x74, 0x72, 0xdc, 0x54,
+                        0xcc, 0x2c, 0xea, 0x2e, 0x88, 0x9c, 0xe0, 0xea,
+                        0x3f, 0x20, 0x5a, 0x78, 0x22, 0x0c, 0xbc, 0x78,
+                        0x2b, 0xe6, 0x28, 0x5a, 0x21, 0x9c, 0xb7, 0xf3
+                        }; 
 
       // ************************ ADC sample pairs ************************************
  
 int16_t   samples = 0;                              // Number of samples taken in last sampling
 int16_t   Vsample [MAX_SAMPLES];                    // voltage/current pairs during sampling
 int16_t   Isample [MAX_SAMPLES];
-
-
-

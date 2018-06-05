@@ -50,19 +50,61 @@
   ----------------------------------------------------------------------------------------------------------------
 */
 
+const char P_txtPlain[] PROGMEM = "text/plain";
+const char P_appJson[]  PROGMEM = "application/json";
+const char P_txtJson[]  PROGMEM = "text/json";
+
+    /* handleRequest - basic gatekeeper to administrate authorization */
+
+void handleRequest(){
+  String uri = server.uri();
+  if(uri.equals("/") || uri.equals("/index.htm") || uri.equals("/cnfstyle.css")){
+    if(! loadFromSdCard(uri)){
+      returnFail("");
+    }
+  }
+  /*
+  if( ! server.authenticate("admin","admin")){
+    server.requestAuthentication(BASIC_AUTH);
+    return;
+  }
+  */
+  if(serverOn(F("/status"),HTTP_GET, handleStatus)) return;
+  if(serverOn(F("/vcal"),HTTP_GET, handleVcal)) return;
+  if(serverOn(F("/command"), HTTP_GET, handleCommand)) return;
+  if(serverOn(F("/list"), HTTP_GET, printDirectory)) return;
+  if(serverOn(F("/config"), HTTP_GET, handleGetConfig)) return;
+  if(serverOn(F("/edit"), HTTP_DELETE, handleDelete)) return;
+  if(serverOn(F("/edit"), HTTP_PUT, handleCreate)) return;
+  if(serverOn(F("/feed/list.json"), HTTP_GET, handleGetFeedList)) return;
+  if(serverOn(F("/feed/data.json"), HTTP_GET, handleGetFeedData)) return;
+  if(serverOn(F("/graph/create"),HTTP_POST, handleGraphCreate)) return;
+  if(serverOn(F("/graph/update"),HTTP_POST, handleGraphCreate)) return;
+  if(serverOn(F("/graph/delete"),HTTP_POST, handleGraphDelete)) return;
+  if(serverOn(F("/graph/getall"), HTTP_GET, handleGraphGetall)) return;
+  handleNotFound();   
+}
+
+bool serverOn(const __FlashStringHelper* uri, HTTPMethod method, genericHandler fn){
+  if(strcmp_P(server.uri().c_str(),(PGM_P)uri) == 0 && server.method() == method){
+    fn();
+    return true;
+  }
+  return false;
+}
+
 void returnOK() {
-  server.send(200, "text/plain", "");
+  server.send(200, P_txtPlain, "");
 }
 
 void returnFail(String msg) {
-  Serial.println("Fail routine.");
-  server.send(500, "text/plain", msg + "\r\n");
+  server.send(500, P_txtPlain, msg + "\r\n");
 }
 
 bool loadFromSdCard(String path){
   trace(T_WEB,13);
   if( ! path.startsWith("/")) path = '/' + path;
-  String dataType = "text/plain";
+  String dataType = P_txtPlain;
   if(path.endsWith("/")) path += "index.htm";
   if(path == "/edit" ||
      path == "/graph"){
@@ -70,16 +112,16 @@ bool loadFromSdCard(String path){
      }
 
   if(path.endsWith(".src")) path = path.substring(0, path.lastIndexOf("."));
-  else if(path.endsWith(".htm")) dataType = "text/html";
-  else if(path.endsWith(".css")) dataType = "text/css";
-  else if(path.endsWith(".js"))  dataType = "application/javascript";
-  else if(path.endsWith(".png")) dataType = "image/png";
-  else if(path.endsWith(".gif")) dataType = "image/gif";
-  else if(path.endsWith(".jpg")) dataType = "image/jpeg";
-  else if(path.endsWith(".ico")) dataType = "image/x-icon";
-  else if(path.endsWith(".xml")) dataType = "text/xml";
-  else if(path.endsWith(".pdf")) dataType = "application/pdf";
-  else if(path.endsWith(".zip")) dataType = "application/zip";
+  else if(path.endsWith(".htm")) dataType = F("text/html");
+  else if(path.endsWith(".css")) dataType = F("text/css");
+  else if(path.endsWith(".js"))  dataType = F("application/javascript");
+  else if(path.endsWith(".png")) dataType = F("image/png");
+  else if(path.endsWith(".gif")) dataType = F("image/gif");
+  else if(path.endsWith(".jpg")) dataType = F("image/jpeg");
+  else if(path.endsWith(".ico")) dataType = F("image/x-icon");
+  else if(path.endsWith(".xml")) dataType = F("text/xml");
+  else if(path.endsWith(".pdf")) dataType = F("application/pdf");
+  else if(path.endsWith(".zip")) dataType = F("application/zip");
 
   File dataFile = SD.open(path.c_str());
   if(dataFile.isDirectory()){
@@ -91,7 +133,7 @@ bool loadFromSdCard(String path){
   if (!dataFile)
     return false;
     
-  if (server.hasArg("download")) dataType = "application/octet-stream";
+  if (server.hasArg("download")) dataType = F("application/octet-stream");
 
   if(server.hasArg("textpos")){
     sendMsgFile(dataFile, server.arg("textpos").toInt());
@@ -102,8 +144,9 @@ bool loadFromSdCard(String path){
     if(path.equalsIgnoreCase("/config.txt")){
       server.sendHeader("X-configSHA256", base64encode(configSHA256, 32));
     }
-    if (server.streamFile(dataFile, dataType) != dataFile.size()) {
-      msgLog(F("Server: Sent less data than expected!"));
+    size_t sent = server.streamFile(dataFile, dataType);
+    if ( sent != dataFile.size()) {
+      Serial.printf_P(PSTR("Server: sent less data than expected. file %s, sent %d, expected %d\r\n"), dataFile.name(), sent, dataFile.size());
     }
   }
   dataFile.close();
@@ -112,21 +155,27 @@ bool loadFromSdCard(String path){
 
 void handleFileUpload(){
   trace(T_WEB,11);
-  static bool hashFile = false; 
+  /*
+  if( ! server.authenticate("admin","admin")){
+    server.requestAuthentication(BASIC_AUTH);
+    return;
+  }
+  */
   if(server.uri() != "/edit") return;
   HTTPUpload& upload = server.upload();
   if(upload.status == UPLOAD_FILE_START){
-    hashFile = false;
     if(upload.filename.equalsIgnoreCase("config.txt") ||
         upload.filename.equalsIgnoreCase("/config.txt")){ 
-      if(server.hasArg("configSHA256")){
-        if(server.arg("configSHA256") != base64encode(configSHA256, 32)){
-          server.send(409, "text/plain", "Config not current");
+      if(server.hasArg(F("configSHA256"))){
+        if(server.arg(F("configSHA256")) != base64encode(configSHA256, 32)){
+          server.send(409, P_txtPlain, "Config not current");
           return;
         }
       }
-      hashFile = true;
-      sha256.reset();  
+      if( ! uploadSHA){
+        uploadSHA = new SHA256;
+      }
+      uploadSHA->reset();  
     }
     if(SD.exists((char *)upload.filename.c_str())) SD.remove((char *)upload.filename.c_str());
     if(uploadFile = SD.open(upload.filename.c_str(), FILE_WRITE)){
@@ -135,16 +184,20 @@ void handleFileUpload(){
   } else if(upload.status == UPLOAD_FILE_WRITE){
     if(uploadFile) {
       uploadFile.write(upload.buf, upload.currentSize);
-      sha256.update(upload.buf, upload.currentSize);
-      DBG_OUTPUT_PORT.print("Upload: WRITE, Bytes: "); DBG_OUTPUT_PORT.println(upload.currentSize);
+      if(uploadSHA){
+        uploadSHA->update(upload.buf, upload.currentSize);
+      }
+      // DBG_OUTPUT_PORT.print("Upload: WRITE, Bytes: "); DBG_OUTPUT_PORT.println(upload.currentSize);
     }
     
   } else if(upload.status == UPLOAD_FILE_END){
     if(uploadFile){
       uploadFile.close();
       DBG_OUTPUT_PORT.print("Upload: END, Size: "); DBG_OUTPUT_PORT.println(upload.totalSize);
-      if(hashFile){
-        sha256.finalize(configSHA256, 32);
+      if(uploadSHA){
+        uploadSHA->finalize(configSHA256, 32);
+        delete uploadSHA;
+        uploadSHA = nullptr;
         server.sendHeader("X-configSHA256", base64encode(configSHA256, 32));
       }
     }
@@ -184,6 +237,12 @@ void handleDelete(){
   String path = server.arg(0);
   if(path == "/" || !SD.exists((char *)path.c_str())) {
     returnFail("BAD PATH");
+    return;
+  }
+  if(path == "/config.txt" ||
+     path.startsWith(IotaLogFile) ||
+     path.startsWith(historyLogFile)){
+    returnFail("Restricted File");
     return;
   }
   deleteRecursive(path);
@@ -235,34 +294,20 @@ void printDirectory() {
   }  
   String response = "";
   array.printTo(response);
-  server.send(200, "application/json", response);
+  server.send(200, P_appJson, response);
   dir.close();
 }
 
 void handleNotFound(){
   trace(T_WEB,12); 
-  String serverURI = server.uri();
-  if(serverURI.startsWith("//")) serverURI.remove(0,1);   // fix EmonCMS graph bug
-  if(serverURI.startsWith("/feed/list")){
-    handleGetFeedList();
-    return;
-  }
-  if(serverURI == "/graph/getall"){
-    handleGraphGetall();
-    return;
-  }
-  if(serverURI.startsWith("/feed/data")){
-    serverAvailable = false;
-    NewService(handleGetFeedData);
-    return;
-  }
+  // String serverURI = server.uri();
   if(loadFromSdCard(server.uri())) return;
   String message = "Not found: ";
   message += (server.method() == HTTP_GET)?"GET":"POST";
   message += ", URI: ";
   message += server.uri();
-  server.send(404, "text/plain", message);
-  Serial.println(message);
+  server.send(404, P_txtPlain, message);
+  // Serial.println(message);
 }
 
 /************************************************************************************************
@@ -276,38 +321,45 @@ void handleStatus(){
   DynamicJsonBuffer jsonBuffer;
   JsonObject& root = jsonBuffer.createObject(); 
   
-  if(server.hasArg("stats")){
+  if(server.hasArg(F("stats"))){
     trace(T_WEB,14);
     JsonObject& stats = jsonBuffer.createObject();
-    stats.set("cyclerate", samplesPerCycle);
-    stats.set("chanrate",cycleSampleRate);
-    stats.set("runseconds", UNIXtime()-programStartTime);
-    stats.set("stack",ESP.getFreeHeap());
-    stats.set("version",IOTAWATT_VERSION);
-    stats.set("frequency",frequency);
-    root.set("stats",stats);
+    stats.set(F("cyclerate"), samplesPerCycle);
+    trace(T_WEB,14);
+    stats.set(F("chanrate"),cycleSampleRate);
+    trace(T_WEB,14);
+    stats.set(F("runseconds"), UNIXtime()-programStartTime);
+    trace(T_WEB,14);
+    stats.set(F("stack"),ESP.getFreeHeap());
+    trace(T_WEB,14);
+    stats.set(F("version"),IOTAWATT_VERSION);
+    trace(T_WEB,14);
+    stats.set(F("frequency"),frequency);
+    trace(T_WEB,14);
+    root.set(F("stats"),stats);
   }
   
-  if(server.hasArg("inputs")){
+  if(server.hasArg(F("inputs"))){
     trace(T_WEB,15);
     JsonArray& channelArray = jsonBuffer.createArray();
     for(int i=0; i<maxInputs; i++){
       if(inputChannel[i]->isActive()){
         JsonObject& channelObject = jsonBuffer.createObject();
-        channelObject.set("channel",inputChannel[i]->_channel);
+        channelObject.set(F("channel"),inputChannel[i]->_channel);
         if(inputChannel[i]->_type == channelTypeVoltage){
-          channelObject.set("Vrms",statBucket[i].volts);
-          channelObject.set("Hz",statBucket[i].Hz);
+          channelObject.set(F("Vrms"),statRecord.accum1[i]);
+          channelObject.set(F("Hz"),statRecord.accum2[i]);
         }
         else if(inputChannel[i]->_type == channelTypePower){
-          if(statBucket[i].watts < 0 && statBucket[i].watts > -.5) statBucket[i].watts = 0;
-          channelObject.set("Watts",String(statBucket[i].watts,0));
-          channelObject.set("Irms",String(statBucket[i].amps,3));
-          if(statBucket[i].watts > 10){
-            channelObject.set("Pf",statBucket[i].watts/(statBucket[i].amps*statBucket[inputChannel[i]->_vchannel].volts));
-          } 
+          if(statRecord.accum1[i] > -2 && statRecord.accum1[i] < 2) statRecord.accum1[i] = 0;
+          channelObject.set(F("Watts"),String(statRecord.accum1[i],0));
+          double pf = statRecord.accum2[i];
+          if(pf != 0){
+            pf = statRecord.accum1[i] / pf;
+          }
+          channelObject.set("Pf",pf);
           if(inputChannel[i]->_reversed){
-            channelObject.set("reversed","true");
+            channelObject.set(F("reversed"),true);
           }
         }
         channelArray.add(channelObject);
@@ -316,82 +368,103 @@ void handleStatus(){
     root["inputs"] = channelArray;
   }
 
-  if(server.hasArg("outputs")){
+  if(server.hasArg(F("outputs"))){
     trace(T_WEB,16);
     JsonArray& outputArray = jsonBuffer.createArray();
     Script* script = outputs->first();
     while(script){
       JsonObject& channelObject = jsonBuffer.createObject();
-      channelObject.set("name",script->name());
-      channelObject.set("units",script->units());
-      double value = script->run([](int i)->double {return statBucket[i].value1;});
-      channelObject.set("value",value);
-      channelObject.set("Watts",value);  // depricated 3.04
+      channelObject.set(F("name"),script->name());
+      channelObject.set(F("units"),script->getUnits());
+      double value = script->run((IotaLogRecord*)nullptr, &statRecord, 1.0);
+      channelObject.set(F("value"),value);
       outputArray.add(channelObject);
       script = script->next();
     }
     root["outputs"] = outputArray;
   }
 
-  if(server.hasArg("voltage")){
+  if(server.hasArg(F("influx"))){
     trace(T_WEB,17);
-    int Vchan = server.arg("channel").toInt();
-    root.set("voltage", statBucket[Vchan].volts);
+    JsonObject& influx = jsonBuffer.createObject();
+    influx.set(F("running"),influxStarted);
+    influx.set(F("lastpost"),influxLastPost);  
+    root["influx"] = influx;
   }
+
+  if(server.hasArg(F("datalogs"))){
+    trace(T_WEB,17);
+    JsonObject& datalogs = jsonBuffer.createObject();
+    JsonObject& currlog = jsonBuffer.createObject();
+    currlog.set(F("firstkey"),currLog.firstKey());
+    currlog.set(F("lastkey"),currLog.lastKey());
+    currlog.set(F("size"),currLog.fileSize());
+    currlog.set(F("interval"),currLog.interval());
+    //currlog.set("wrap",currLog._wrap ? true : false);
+    datalogs.set(F("currlog"),currlog);
+    JsonObject& histlog = jsonBuffer.createObject();
+    histlog.set(F("firstkey"),histLog.firstKey());
+    histlog.set(F("lastkey"),histLog.lastKey());
+    histlog.set(F("size"),histLog.fileSize());
+    histlog.set(F("interval"),histLog.interval());
+    //histlog.set("wrap",histLog._wrap ? true : false);
+    datalogs.set(F("histlog"),histlog);
+    root.set(F("datalogs"),datalogs);
+  }
+
   String response = "";
   root.printTo(response);
-  server.send(200, "text/json", response);  
+  server.send(200, P_txtJson, response);  
 }
 
 void handleVcal(){
   trace(T_WEB,1); 
-  if( ! (server.hasArg("channel") && server.hasArg("cal"))){
-    server.send(400, "text/json", "Missing parameters");
+  if( ! (server.hasArg(F("channel")) && server.hasArg("cal"))){
+    server.send(400, P_txtJson, F("Missing parameters"));
     return;
   }
   DynamicJsonBuffer jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
-  int channel = server.arg("channel").toInt();
+  int channel = server.arg(F("channel")).toInt();
   float Vrms = sampleVoltage(channel, server.arg("cal").toFloat());
   root.set("vrms",Vrms);
   String response = "";
   root.printTo(response);
-  server.send(200, "text/json", response);  
+  server.send(200, P_txtJson, response);  
 }
 
 void handleCommand(){
   trace(T_WEB,2); 
-  if(server.hasArg("restart")) {
+  if(server.hasArg(F("restart"))) {
     trace(T_WEB,3); 
     server.send(200, "text/plain", "ok");
-    msgLog(F("Restart command received."));
+    log("Restart command received.");
     delay(500);
     ESP.restart();
   }
-  if(server.hasArg("vtphase")){
+  if(server.hasArg(F("vtphase"))){
     trace(T_WEB,4); 
     uint16_t chan = server.arg("vtphase").toInt();
     int refChan = 0;
-    if(server.hasArg("refchan")){
-      refChan = server.arg("refchan").toInt();
+    if(server.hasArg(F("refchan"))){
+      refChan = server.arg(F("refchan")).toInt();
     }
-    uint16_t shift = 0;
-    if(server.hasArg("shift")){
-      shift = server.arg("shift").toInt();
+    uint16_t shift = 60;
+    if(server.hasArg(F("shift"))){
+      shift = server.arg(F("shift")).toInt();
     }
-    String response = "Calculated shift: " + String(samplePhase(refChan, chan, shift),2);
-    server.send(200, "text/plain", response);
+    server.send(200, P_txtPlain, samplePhase(refChan, chan, shift));
     return; 
   }
-  if(server.hasArg("sample")){
+  if(server.hasArg(F("sample"))){
     trace(T_WEB,5); 
-    uint16_t chan = server.arg("sample").toInt();
+    uint16_t chan = server.arg(F("sample")).toInt();
     samplePower(chan,0);
     String response = String(samples) + "\n\r";
     for(int i=0; i<samples; i++){
-      response += String(Vsample[i]) + "," + String(Isample[i]) + "\n";
+      response += String(Vsample[i]) + "," + String(Isample[i]) + "\r\n";
     }
-    server.send(200, "text/plain", response);
+    server.send(200, P_txtPlain, response);
     return; 
   }
   if (server.hasArg("channel")) {
@@ -429,14 +502,37 @@ void handleCommand(){
     server.send(200, "text/json", response);  
     return; 
   }
-  if(server.hasArg("disconnect")) {
+  if(server.hasArg(F("disconnect"))) {
     trace(T_WEB,6); 
-    server.send(200, "text/plain", "ok");
-    msgLog(F("Disconnect command received."));
+    server.send(200, P_txtPlain, "ok");
+    log("Disconnect command received.");
     WiFi.disconnect(false);
     return;
   }
-  server.send(400, "text/json", "Unrecognized request");
+  if(server.hasArg(F("deletelog"))) {
+    trace(T_WEB,21); 
+    server.send(200, "text/plain", "ok");
+    if(server.arg(F("deletelog")) == "current"){
+      log("delete current log command received.");
+      currLog.end();
+      delay(1000);
+      deleteRecursive(String(IotaLogFile) + ".log");
+      deleteRecursive(String(IotaLogFile) + ".ndx");
+      ESP.restart();
+    }
+    if(server.arg(F("deletelog")) == "history"){
+      trace(T_WEB,21); 
+      server.send(200, P_txtPlain, "ok");
+      log("delete history log command received.");
+      histLog.end();
+      deleteRecursive(String(historyLogFile) + ".log");
+      deleteRecursive(String(historyLogFile) + ".ndx");
+      delay(1000);
+      ESP.restart();
+    }
+    
+  }
+  server.send(400, P_txtJson, F("Unrecognized request"));
 }
 
 void handleGetFeedList(){ 
@@ -447,53 +543,73 @@ void handleGetFeedList(){
     if(inputChannel[i]->isActive()){
       if(inputChannel[i]->_type == channelTypeVoltage){
         JsonObject& voltage = jsonBuffer.createObject();
-        voltage["id"] = String(inputChannel[i]->_channel*10+QUERY_VOLTAGE);
-        voltage["tag"] = "Voltage";
+        voltage["id"] = String("IV") + String(inputChannel[i]->_name);
+        voltage["tag"] = F("Voltage");
         voltage["name"] = inputChannel[i]->_name;
         array.add(voltage);
       } 
       else
         if(inputChannel[i]->_type == channelTypePower){
         JsonObject& power = jsonBuffer.createObject();
-        power["id"] = String(inputChannel[i]->_channel*10+QUERY_POWER);
-        power["tag"] = "Power";
+        power["id"] = String("IP") + String(inputChannel[i]->_name);
+        power["tag"] = F("Power");
         power["name"] = inputChannel[i]->_name;
         array.add(power);
         JsonObject& energy = jsonBuffer.createObject();
-        energy["id"] = String(inputChannel[i]->_channel*10+QUERY_ENERGY);
-        energy["tag"] = "Energy";
+        energy["id"] = String("IE") + String(inputChannel[i]->_name);
+        energy["tag"] = F("Energy");
         energy["name"] = inputChannel[i]->_name;
         array.add(energy);
       }
     }
   }
-  trace(T_WEB,19);
+  trace(T_WEB,18);
   Script* script = outputs->first();
   int outndx = 100;
   while(script){
-    JsonObject& power = jsonBuffer.createObject();
-    power["id"] = String(outndx*10+QUERY_POWER);
-    String units = String(script->units());
-    if(units.equalsIgnoreCase("volts")){
-      power["tag"] = "Voltage";
+    if(String(script->name()).indexOf(' ') == -1){
+      String units = String(script->getUnits());
+      if(units.equalsIgnoreCase("volts")){
+        JsonObject& voltage = jsonBuffer.createObject();
+        voltage["id"] = String("OV") + String(script->name());
+        voltage["tag"] = F("Voltage");
+        voltage["name"] = script->name();
+        array.add(voltage);
+      } 
+      else if(units.equalsIgnoreCase("watts")) {
+        
+        JsonObject& power = jsonBuffer.createObject();
+        power["id"] = String("OP") + String(script->name());
+        power["tag"] = F("Power");
+        power["name"] = script->name();
+        array.add(power);
+        JsonObject& energy = jsonBuffer.createObject();
+        energy["id"] = String("OE") + String(script->name());
+        energy["tag"] = F("Energy");
+        energy["name"] = script->name();
+        array.add(energy);
+      }
+      else {
+        JsonObject& other = jsonBuffer.createObject();
+        other["id"] = String("OO") + String(script->name());
+        other["tag"] = F("Outputs");
+        other["name"] = script->name();
+        array.add(other);
+      }
     }
-    else {
-      power["tag"] = "Power";
-    }
-    power["name"] = script->name();
-    array.add(power);
-    outndx++;
     script = script->next();
   }
   
-  String response = "";
+  String response;
   array.printTo(response);
-  server.send(200, "application/json", response);
+  server.send(200, P_appJson,response);
 }
 
-void handleGraphGetall(){                   // Stub to appease EmonCMS graph app
+void handleGetFeedData(){
+  serverAvailable = false;
+  HTTPrequestFree--;
+  NewService(getFeedData);
   return;
-  server.send(200, "ok", "{}");
 }
 
 // Had to roll our own streamFile function so we can set the actual partial
@@ -511,26 +627,25 @@ void sendMsgFile(File &dataFile, int32_t relPos){
     }
     absPos = dataFile.position();
     server.setContentLength(dataFile.size() - absPos);
-    server.send(200, "text/plain", "");
+    server.send(200, P_txtPlain, "");
     WiFiClient _client = server.client();
-    _client.write(dataFile, 1460);
+    _client.write(dataFile);
 }
 
 void handleGetConfig(){
   trace(T_WEB,8); 
-  if(server.hasArg("update")){
-    if(server.arg("update") == "restart"){
-      server.send(200, "text/plain", "OK");
-      msgLog(F("Restart command received."));
+  if(server.hasArg(F("update"))){
+    if(server.arg(F("update")) == "restart"){
+      server.send(200, F("text/plain"), "OK");
+      log("Restart command received.");
       delay(500);
       ESP.restart();
     }
-    else if(server.arg("update") == "reload"){
+    else if(server.arg(F("update")) == "reload"){
       getConfig(); 
-      server.send(200, "text/plain", "OK");
+      server.send(200, P_txtPlain, "OK");
       return;  
     }
   }
-  server.send(400, "text/plain", "Bad Request.");
+  server.send(400, P_txtPlain, "Bad Request.");
 }
-

@@ -27,6 +27,7 @@
   static states state = initialize;                                                       
   static IotaLogRecord* logRecord = new IotaLogRecord;
   static double accum1Then [MAXINPUTS];
+  static double accum2Then [MAXINPUTS];
   static uint32_t timeThen = 0;
   uint32_t timeNow = millis();
   static uint32_t timeNext;
@@ -34,22 +35,35 @@
 
     case initialize: {
 
-      msgLog(F("dataLog: service started."));
+      log("dataLog: service started.");
 
       // Initialize the IotaLog class
       
-      if(int rtc = iotaLog.begin((char*)IotaLogFile.c_str())){
-        msgLog("dataLog: Log file open failed. ", String(rtc));
+      if(int rtc = currLog.begin(IotaLogFile)){
+        log("dataLog: Log file open failed. %d", rtc);
         dropDead();
+      }
+
+      // Initialize the IotaLogRecord accums in case no context.
+
+      for(int i=0; i<MAXINPUTS; i++){
+        logRecord->accum1[i] = 0.0;
+        logRecord->accum2[i] = 0.0;
       }
 
       // If it's not a new log, get the last entry.
       
-      if(iotaLog.firstKey() != 0){
-        logRecord->UNIXtime = iotaLog.lastKey();
-        iotaLog.readKey(logRecord);
-        
-        msgLog("dataLog: Last log entry:", iotaLog.lastKey());
+      if(currLog.fileSize() == 0){
+        if(histLog.begin(historyLogFile) == 0 && histLog.fileSize() > 0){
+          logRecord->UNIXtime = histLog.lastKey();
+          histLog.readKey(logRecord);
+          log("dataLog: Last history entry: %d", logRecord->UNIXtime);
+        }
+      }
+      else {
+        logRecord->UNIXtime = currLog.lastKey();
+        currLog.readKey(logRecord);
+        log("dataLog: Last log entry: %d", currLog.lastKey());
       }
 
       state = checkClock;
@@ -67,6 +81,7 @@
         if(_input){
           inputChannel[i]->ageBuckets(timeNow);
           accum1Then[i] = inputChannel[i]->dataBucket.accum1;
+          accum2Then[i] = inputChannel[i]->dataBucket.accum2;
         }
       }
       timeThen = timeNow;
@@ -78,7 +93,7 @@
       // If it's been a long time since last entry, skip ahead.
       
       if((UNIXtime() - logRecord->UNIXtime) > GapFill){
-        logRecord->UNIXtime = UNIXtime() - UNIXtime() % dataLogInterval;
+        logRecord->UNIXtime = UNIXtime() - UNIXtime() % currLog.interval();
       }
 
       // Initialize timeNext (will be incremented at exit below)
@@ -86,6 +101,7 @@
 
       timeNext = logRecord->UNIXtime;
       state = logData;
+      _serviceBlock->priority = priorityHigh;
       break;
     }
  
@@ -97,18 +113,22 @@
 
       // If log is up to date, update the entry with latest data.
           
-      if(timeNext == (UNIXtime() - UNIXtime() % dataLogInterval)){
+      if(timeNext >= (UNIXtime() - UNIXtime() % currLog.interval())){
         double elapsedHrs = double((uint32_t)(timeNow - timeThen)) / MS_PER_HOUR;
         for(int i=0; i<maxInputs; i++){
           IotaInputChannel* _input = inputChannel[i];
           if(_input){
             _input->ageBuckets(timeNow);
-            logRecord->channel[i].accum1 += _input->dataBucket.accum1 - accum1Then[i];
-            if(logRecord->channel[i].accum1 != logRecord->channel[i].accum1) logRecord->channel[i].accum1 = 0;
+            logRecord->accum1[i] += _input->dataBucket.accum1 - accum1Then[i];
+            if(logRecord->accum1[i] != logRecord->accum1[i]) logRecord->accum1[i] = 0;
             accum1Then[i] = _input->dataBucket.accum1;
+            logRecord->accum2[i] += _input->dataBucket.accum2 - accum2Then[i];
+            if(logRecord->accum2[i] != logRecord->accum2[i]) logRecord->accum2[i] = 0;
+            accum2Then[i] = _input->dataBucket.accum2;
           }
           else {
             accum1Then[i] = 0;
+            accum2Then[i] = 0;
           }
         }
         timeThen = timeNow;
@@ -119,14 +139,70 @@
       
       logRecord->UNIXtime = timeNext;
       logRecord->serial++;
-      iotaLog.write(logRecord);
+      currLog.write(logRecord);
       break;
     }
   }
 
   // Advance the time and return.
   
-  timeNext += dataLogInterval;
+  timeNext += currLog.interval();
   return timeNext;
 }
 
+/******************************************************************************
+ * logReadKey(iotaLogRecord) - read a keyed record from the combined log
+ * 
+ * This function brokers keyed log read requests, servicing them from the
+ * appropriate log:
+ * 
+ * currLog:
+ * relatively recent data spanning the past 12-15 months.
+ * small interval (5 seconds).
+ * potentially slower access because it can have holes neccessitating searching.
+ * 
+ * histLog:
+ * contains all of the data since the beginning of time.
+ * large interval (60 seconds).
+ * Look ma - no holes!  direct access w/o searching.
+ * 
+ * This function will decide the most appropriate log to retrieve the requested 
+ * record from based on these principles.
+ * 
+ * If the key is a multiple of the history log interval, and is contained in
+ * the history log, use the history log.
+ * 
+ * If the key is not a multiple of the history log interval and contained in
+ * the currLog, use the currLog.
+ * 
+ * If the key is not a multiple of the history log, but not contained in the 
+ * currLog, use the history log.
+ * 
+ * if the key is between the end of the history log and the start of the currLog,
+ * return the last record in the history log with requested key.
+ * 
+ * ***************************************************************************/
+
+uint32_t logReadKey(IotaLogRecord* callerRecord) {
+  uint32_t key = callerRecord->UNIXtime;
+  if(key % histLog.interval()){               // not multiple of histLog interval
+    if(key >= currLog.firstKey()){            // in iotaLog
+      return currLog.readKey(callerRecord);
+    }
+    if(key <= histLog.lastKey()){             // in histLog
+      return histLog.readKey(callerRecord);
+    }
+  }
+  else {                                      // multiple of histLog interval
+    if(key <= histLog.lastKey()){             // in histLog
+      return histLog.readKey(callerRecord);
+    }
+    if(key >= currLog.firstKey()){            // in IotaLog
+      return currLog.readKey(callerRecord);
+    }
+  }
+  callerRecord->UNIXtime = histLog.lastKey(); // between the two logs (rare)
+  histLog.readKey(callerRecord);
+  callerRecord->UNIXtime = key;
+  return 0;
+}

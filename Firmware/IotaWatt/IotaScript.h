@@ -3,6 +3,19 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include "IotaLog.h"
+
+enum        units {
+            unitsWatts = 0,
+            unitsVolts = 1,
+            unitsAmps = 2,
+            unitsVA = 3,
+            unitsHz = 4,
+            unitsWh = 5,
+            unitskWh = 6,
+            unitsPF = 7,
+            unitsNone = 8
+            };         // Units to be computed   
 
 class Script {
 
@@ -10,45 +23,27 @@ class Script {
 
   public:
 
-    Script(JsonObject& JsonScript) {
-      _next = NULL;
-      JsonVariant var = JsonScript["name"];
-      if(var.success()){
-        _name = new char[strlen(var.as<char*>())+1];
-        strcpy(_name, var.as<char*>());
-      }
-      var = JsonScript["units"];
-      if(var.success()){
-        _units = new char[strlen(var.as<char*>())+1];
-        strcpy(_units, var.as<char*>());
-      }
-      var = JsonScript["script"];
-      if(var.success()){
-        encodeScript(var.as<char*>() );
-      }
-    }
-
-    ~Script() {
-      delete[] _name;
-      delete[] _units;
-      delete[] _tokens;
-      delete[] _constants;
-    }
+    Script(JsonObject&); 
+    ~Script();
 
     char*   name();     // name associated with this Script
-    char*   units();    // units associated with this Script
-    Script*   next();     // -> next Script in set
+    const char*   getUnits();    // units associated with this Script
+    void    setUnits(const char*);
+    Script* next();     // -> next Script in set
 
-    double    run(double inputCallback(int)); // Run this Script
+    double  run(IotaLogRecord* oldRec, IotaLogRecord* newRec, double elapsedHours); // Run this Script
+    double  run(IotaLogRecord* oldRec, IotaLogRecord* newRec, double elapsedHours, units); // Run w/overide units
     void    print();
+    int     precision();
 
   private:
 
     Script*     _next;      // -> next in list
     char*       _name;      // name associated with this Script
-    char*       _units;     // units associated with this Script
+    float*      _constants; // Constant values referenced in Script
     uint8_t*    _tokens;    // Script tokens
-    float*     _constants;   // Constant values referenced in Script
+    units       _units;     // Units to be computed              
+    uint8_t     _accum;               // Accumulators to use in fetching operands
     const byte  getInputOp = 32;
     const byte  getConstOp = 64;
     enum        opCodes {
@@ -62,7 +57,7 @@ class Script {
                 opPop   = 7};
     const char* opChars = "=+-*/|()";
 
-    double    runRecursive(uint8_t**, double inputCallback(int));
+    double    runRecursive(uint8_t**, IotaLogRecord* oldRec, IotaLogRecord* newRec, double elapsedHours, char type);
     double    evaluate(double, byte, double);
     bool      encodeScript(const char* script);
 
