@@ -1,4 +1,6 @@
 #include "IotaWatt.h"
+#include "pvoutput.h"
+
 /***********************************************************************************
     IotaWatt Electric Power Monitor System
     Copyright (C) <2017>  <Bob Lemaire, IoTaWatt, Inc.>
@@ -166,7 +168,6 @@ uint32_t timeRefMs = 0;                      // Internal MS clock corresponding 
 uint32_t timeSynchInterval = 3600;           // Interval (sec) to roll NTP forward and try to refresh
 uint32_t EmonCMSInterval = 10;               // Interval (sec) to invoke EmonCMS
 uint32_t influxDBInterval = 10;              // Interval (sec) to invoke inflexDB 
-uint32_t pvoutputReportInterval = DEFAULT_PVOUTPUT_INTERVAL; // Interval (sec) to invoke pvoutput
 uint32_t statServiceInterval = 1;            // Interval (sec) to invoke statService
 uint32_t updaterServiceInterval = 60*60;     // Interval (sec) to check for software updates 
 

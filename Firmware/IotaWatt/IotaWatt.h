@@ -63,6 +63,7 @@
 #include "samplePower.h"
 #include "influxDB.h"
 #include "Emonservice.h"
+#include "pvoutput.h"
 
 
       // Declare instances of major classes
@@ -145,6 +146,7 @@ extern traceUnion traceEntry;
 #define T_influxConfig 17  // influx configuration 
 #define T_stats 18         // Stat service                      
 #define T_pvoutput 19      // pvoutput
+#define T_pvoutputConfig 20// pvoutput configuration 
 
       // ADC descriptors
 
@@ -222,7 +224,6 @@ extern uint32_t EmonCMSInterval;               // Interval (sec) to invoke EmonC
 extern uint32_t influxDBInterval;              // Interval (sec) to invoke inflexDB
 extern uint32_t statServiceInterval;           // Interval (sec) to invoke statService
 extern uint32_t updaterServiceInterval;        // Interval (sec) to check for software updates
-extern uint32_t pvoutputReportInterval;        // Interval (sec) to invoke pvoutput
 
 extern bool     hasRTC;
 extern bool     RTCrunning;

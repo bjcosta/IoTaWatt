@@ -392,6 +392,14 @@ void handleStatus(){
     root["influx"] = influx;
   }
 
+  if(server.hasArg(F("pvoutput"))){
+    trace(T_WEB,17); // @todo
+    JsonObject& pvoutput = jsonBuffer.createObject();
+    pvoutput.set(F("running"),pvoutputStarted);
+    // @todo pvoutput.set(F("lastpost"),pvoutputLastPost);  
+    root["pvoutput"] = pvoutput;
+  }
+
   if(server.hasArg(F("datalogs"))){
     trace(T_WEB,17);
     JsonObject& datalogs = jsonBuffer.createObject();
@@ -477,7 +485,7 @@ void handleCommand(){
     root.set("name", inputChannel[i]->_name);
     root.set("model", inputChannel[i]->_model);
     root.set("channel", inputChannel[i]->_channel);
-    root.set("ADCbits", inputChannel[i]->_ADCbits);
+    // @todo root.set("ADCbits", inputChannel[i]->_ADCbits);
     root.set("addr", inputChannel[i]->_addr);
     root.set("aRef", inputChannel[i]->_aRef);
     root.set("offset", inputChannel[i]->_offset);

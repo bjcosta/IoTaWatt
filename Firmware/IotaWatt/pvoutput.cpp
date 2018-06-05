@@ -1,3 +1,79 @@
+#include "pvoutput.h"
+
+// Extern vars
+bool         pvoutputStarted = false;
+bool         pvoutputStop = false;
+bool         pvoutputRestart = true;
+const char*  pvoutputApiKey = "";
+int          pvoutputSystemId = 0;
+int          pvoutputMainsChannel = 0;
+int          pvoutputSolarChannel = 0;
+unsigned int pvoutputHTTPTimeout = 2000;
+uint32_t     pvoutputReportInterval = 5*60; // Interval (sec) to invoke pvoutput
+//ScriptSet*   pvoutputOutputs = nullptr;
+
+// private vars
+int32_t   pvoutputConfigRevision = -1;                      // Revision control for dynamic config
+
+bool pvoutputConfig(const char* configObj) {
+  trace(T_pvoutputConfig,0);
+  DynamicJsonBuffer Json;
+  JsonObject& config = Json.parseObject(configObj);
+  trace(T_pvoutputConfig,0);
+  if(!config.success()) {
+    log("pvoutput: Json parse failed.");
+    return false;
+  }
+
+  int revision = config["revision"];
+  if(revision == pvoutputConfigRevision){
+    return true;
+  }
+
+  trace(T_pvoutputConfig,0);
+  pvoutputConfigRevision = revision;
+  pvoutputStop = false;
+  if(config["stop"].as<bool>()){
+    trace(T_pvoutputConfig,1);
+    pvoutputStop = true;
+  }
+  else if(pvoutputStarted){
+    trace(T_pvoutputConfig,2);
+    pvoutputRestart = true;
+  }
+  trace(T_pvoutputConfig,3);
+
+  pvoutputSystemId = config["systemId"].as<int>();
+  pvoutputMainsChannel = config["mainsChannel"].as<int>();
+  pvoutputSolarChannel = config["solarChannel"].as<int>();
+  pvoutputHTTPTimeout = config["httpTimeout"].as<unsigned int>();
+  pvoutputReportInterval = config["reportInterval"].as<int>();
+
+  delete[] pvoutputApiKey;
+  pvoutputApiKey = charstar(config["apiKey"].as<const char*>());
+
+  if(!pvoutputStarted) {
+    trace(T_pvoutputConfig,10);
+    NewService(pvoutputService);
+    pvoutputStarted = true;
+  }
+
+  log("Loaded PVOutput config using: systemID:%d, mainChannel:%d, solarChannel:%d, HTTPTimeout:%d, interval:%d, ApiKey:<private>", pvoutputSystemId, pvoutputMainsChannel, pvoutputSolarChannel, pvoutputHTTPTimeout, pvoutputReportInterval);
+  return true;
+}
+
+uint32_t pvoutputService(struct serviceBlock* _serviceBlock)
+{
+  // @todo For now do nothing but ask to be called again in 1 sec
+  log("pvoutput: Running empty service");
+  return UNIXtime() + 1;
+}
+
+
+
+#if 0
+
+
 #include "IotaWatt.h"
 
 static uint32_t pvoutputSendData(bool isResend, uint32_t unixTime, double voltage, double energyConsumed, double powerConsumed,
@@ -48,9 +124,9 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
     return 0;
   }
 
-  if(pvoutputInitialize) {
+  if(pvoutputRestarted) {
     state = initialize;
-    pvoutputInitialize = false;
+    pvoutputRestarted = false;
   }
 
   switch(state) {
@@ -91,7 +167,7 @@ uint32_t pvoutputService(struct serviceBlock* _serviceBlock) {
         UnixLastPost = buf->data;
       }
       else {
-        // @todo Copied from influx, if failed to open log file then why do we continue (and not just fail init and try
+        // @todo Copied from pvoutput, if failed to open log file then why do we continue (and not just fail init and try
         // again later?
         trace(T_pvoutput, 7);
         msgLog(F("pvoutput: pvoutputlog file failed to open just using most recent iota log time"));
@@ -519,3 +595,4 @@ void SetNextPOSTTime(uint32_t* UnixLastPost, uint32_t* UnixNextPost, uint32_t pv
       + " next POST: " + DateTimeToString(nextDt));
   }
 }
+#endif

@@ -112,6 +112,20 @@ boolean getConfig(void){
     influxStop = true;
   }
   
+        // ************************************** configure pvoutput **********************************
+  trace(T_CONFIG,10);
+  JsonArray& pvoutputArray = Config["pvoutput"];
+  if(pvoutputArray.success()){
+    char* pvoutputStr = JsonDetail(ConfigFile, pvoutputArray);
+    if( ! pvoutputConfig(pvoutputStr)){
+      log("pvoutputService: Invalid configuration.");
+    }
+    delete[] pvoutputStr;
+  }   
+  else {
+    pvoutputStop = true;
+  }
+  
   ConfigFile.close();
   trace(T_CONFIG,9);
   return true;
