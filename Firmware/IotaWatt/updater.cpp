@@ -52,6 +52,7 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
       if( ! request->send()){
         request->abort();
         HTTPrequestFree++;
+        log("Updater failed send update request to server");
         break;
       }
       state = waitVersion;
@@ -61,6 +62,7 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
 
     case waitVersion: {
       if(request->readyState() != 4){
+        log("Update response not ready yet");
         return UNIXtime() + 1;
       }
       HTTPrequestFree++;
@@ -74,6 +76,7 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
       delete request;
       if(strcmp(updateVersion.c_str(), IOTAWATT_VERSION) == 0){
         state = getVersion;
+        log("Updater nothing to do version is already up to date");
         return UNIXtime() + updaterServiceInterval;
       }
       log("Updater: Update from %s to %s", IOTAWATT_VERSION, updateVersion.c_str());
