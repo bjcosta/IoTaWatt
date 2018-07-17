@@ -146,7 +146,6 @@ extern traceUnion traceEntry;
 #define T_influxConfig 17  // influx configuration 
 #define T_stats 18         // Stat service                      
 #define T_pvoutput 19      // pvoutput
-#define T_pvoutputConfig 20// pvoutput configuration 
 
       // ADC descriptors
 

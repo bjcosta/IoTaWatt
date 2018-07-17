@@ -115,16 +115,12 @@ boolean getConfig(void){
         // ************************************** configure pvoutput **********************************
   trace(T_CONFIG,10);
   JsonArray& pvoutputArray = Config["pvoutput"];
-  if(pvoutputArray.success()){
-    char* pvoutputStr = JsonDetail(ConfigFile, pvoutputArray);
-    if( ! pvoutputConfig(pvoutputStr)){
-      log("pvoutputService: Invalid configuration.");
-    }
-    delete[] pvoutputStr;
-  }   
-  else {
-    pvoutputStop = true;
+  char* pvoutputStr = nullptr;
+  if (pvoutputArray.success())
+  {
+    pvoutputStr = JsonDetail(ConfigFile, pvoutputArray);
   }
+  PVOutputUpdateConfig(pvoutputStr);
   
   ConfigFile.close();
   trace(T_CONFIG,9);

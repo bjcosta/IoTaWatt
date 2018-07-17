@@ -395,8 +395,7 @@ void handleStatus(){
   if(server.hasArg(F("pvoutput"))){
     trace(T_WEB,17); // @todo
     JsonObject& pvoutput = jsonBuffer.createObject();
-    pvoutput.set(F("running"),pvoutputStarted);
-    // @todo pvoutput.set(F("lastpost"),pvoutputLastPost);  
+    PVOutputGetStatusJson(pvoutput);
     root["pvoutput"] = pvoutput;
   }
 
