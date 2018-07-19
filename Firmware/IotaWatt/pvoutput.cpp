@@ -59,7 +59,8 @@ private:
     UNMAPPED_ERROR,
     DATE_TOO_OLD,
     DATE_IN_FUTURE,
-    RATE_LIMIT
+    RATE_LIMIT,
+    MOON_POWERED
   };
 
   struct Config
@@ -112,17 +113,17 @@ private:
   static const char* ParseFixedInteger(char* tmp, const char* src, size_t size, int* value, int min, int max);
   static const char* ParseExpectedCharacter(const char* src, char expected);
   static bool ParseGetStatusResponse(const String& responseText, DateTime* dt);
-  static uint32_t CalculatePrevDay(uint32_t ts);
+  uint32_t CalculateDayStart(uint32_t ts);
   static bool ReadSaneLogRecordOrPrev(IotaLogRecord* record, uint32_t when);
   size_t CalculateMissingPeriodsToSkip(IotaLogRecord& prevPostRecord, IotaLogRecord& nextPostRecord);
   void WriteEntryString(const String& entry_str);
   bool CollectNextDataPoint();
   void IncrementTimeInterval(size_t incrementPeriods=1, const char* entryDebug="");
-  bool CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& prevDayRecord) const;
+  bool CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& dayStartRecord) const;
   static String GenerateEntryString(Entry entry);
 
   State state = State::STOPPED;
-  uint32_t unixPrevDay  = 0;
+  uint32_t unixDayStart  = 0;
   uint32_t unixPrevPost = 0;
   uint32_t unixNextPost = 0;
 
@@ -335,7 +336,7 @@ void PVOutput::Stop()
   // Flush apparently means same as clear() on STL containers not flush() of STL files.
   reqData.flush();
  
-  unixPrevDay  = 0;
+  unixDayStart  = 0;
   unixPrevPost = 0;
   unixNextPost = 0;
   reqEntries = 0;
@@ -362,9 +363,13 @@ PVOutput::PVOutputError PVOutput::InterpretPVOutputError(int responseCode, const
     {
       return PVOutputError::DATE_TOO_OLD;
     }
-    else if (strstr(responseText.c_str(), "Date is in the future") != nullptr)
+    else if (strstr(responseText.c_str(), "Date is in the future") != nullptr || strstr(responseText.c_str(), "Invalid future date") != nullptr)
     {
       return PVOutputError::DATE_IN_FUTURE;
+    }
+    else if (strstr(responseText.c_str(), "Moon powered") != nullptr)
+    {
+      return PVOutputError::MOON_POWERED;
     }
   }
   else if (responseCode == 403)
@@ -506,14 +511,17 @@ bool PVOutput::ParseGetStatusResponse(const String& responseText, DateTime* dt)
 }
 
 //=============================================================================
-uint32_t PVOutput::CalculatePrevDay(uint32_t ts)
+uint32_t PVOutput::CalculateDayStart(uint32_t ts)
 {
   DateTime localDt(ts + (localTimeDiff * 3600));
 
   trace(T_pvoutput,17);
-  DateTime localPreviousDay(localDt.year(), localDt.month(), localDt.day(), 23, 59, 59);
-  localPreviousDay = localPreviousDay - TimeSpan(1, 00, 0, 0);
-  return localPreviousDay.unixtime() - (localTimeDiff * 3600);
+  DateTime localDayStart(localDt.year(), localDt.month(), localDt.day(), 00, 00, 00);
+  uint32_t dayStart = localDayStart.unixtime() - (localTimeDiff * 3600);
+
+  // Make sure it is on a report boundary (Is generally expected anyway)
+  dayStart -= dayStart % config.reportInterval;
+  return dayStart;
 }
 
 //=============================================================================
@@ -682,9 +690,9 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   // so we need to read the last record seen the day before and use that as the "reference"
   // When the day ticks over, then we will update the reference
   trace(T_pvoutput,35);
-  unixPrevDay = CalculatePrevDay(unixNextPost);
-  log("unixPrevDay: %s, unixPrevPost: %s, unixNextPost: %s, now: %s, lastKey: %s", 
-    dateString(unixPrevDay).c_str(),
+  unixDayStart = CalculateDayStart(unixNextPost);
+  log("unixDayStart: %s, unixPrevPost: %s, unixNextPost: %s, now: %s, lastKey: %s", 
+    dateString(unixDayStart).c_str(),
     dateString(unixPrevPost).c_str(),
     dateString(unixNextPost).c_str(),
     dateString(UNIXtime()).c_str(),
@@ -709,12 +717,12 @@ bool PVOutput::ReadSaneLogRecordOrPrev(IotaLogRecord* record, uint32_t when)
   // There was also code to manually search back in time using:
   //int rkResult = 1;
   //do {
-  //rkResult = currLog.readKey(prevDayRecord);
+  //rkResult = currLog.readKey(dayStartRecord);
   //if(rkResult != 0) {
   //trace(T_pvoutput, 9);
-  //prevDayRecord->UNIXtime -= 1;
+  //dayStartRecord->UNIXtime -= 1;
   //}
-  //} while(rkResult != 0 && prevDayRecord->UNIXtime > currLog.firstKey());
+  //} while(rkResult != 0 && dayStartRecord->UNIXtime > currLog.firstKey());
 
   // Check for NaN
   if(record->serial != record->serial)
@@ -760,7 +768,7 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
   // Adjust to a report interval boundary
   unixNextPost -= unixNextPost % config.reportInterval;
 
-  // If we move to a new day, then update prevDayRecord
+  // If we move to a new day, then update dayStartRecord
   DateTime localPrevPostDt(unixPrevPost + (localTimeDiff * 3600));
   DateTime localNextPostDt(unixNextPost + (localTimeDiff * 3600));
 
@@ -769,8 +777,7 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
   {
     trace(T_pvoutput,41);
     message = "Started a new day for log accumulation";
-    //unixPrevDay = unixNextPost;
-    unixPrevDay = CalculatePrevDay(unixNextPost);
+    unixDayStart = CalculateDayStart(unixNextPost);
   }
   else
   {
@@ -778,11 +785,11 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
     message = "Still in same day for log accumulation";
   }
 
-  log("Entry: %s : %s : After incrementing %u periods the new values are: unixPrevDay: %s, unixPrevPost: %s, unixNextPost: %s, now: %s, lastKey: %s", 
+  log("Entry: %s : %s : After incrementing %u periods the new values are: unixDayStart: %s, unixPrevPost: %s, unixNextPost: %s, now: %s, lastKey: %s", 
     entryDebug,
     message,
     (unsigned int)incrementPeriods,
-    dateString(unixPrevDay).c_str(),
+    dateString(unixDayStart).c_str(),
     dateString(unixPrevPost).c_str(),
     dateString(unixNextPost).c_str(),
     dateString(UNIXtime()).c_str(),
@@ -791,7 +798,7 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
 }
 
 //=============================================================================
-bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& prevDayRecord) const
+bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& dayStartRecord) const
 {
   // @todo Is this correct or should it be unixPrevPost and we adjust all the prev/next logic (particulary on GetStatus)?
   entry->unixTime = unixNextPost;
@@ -837,7 +844,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   if(config.solarChannel >= 0) 
   {
     trace(T_pvoutput,44);
-    entry->energyGenerated = nextPostRecord.accum1[config.solarChannel] - prevDayRecord.accum1[config.solarChannel];
+    entry->energyGenerated = nextPostRecord.accum1[config.solarChannel] - dayStartRecord.accum1[config.solarChannel];
     if(entry->energyGenerated > 0)
     {
       entry->energyGenerated *= -1;
@@ -849,7 +856,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   if(config.mainsChannel >= 0) 
   {
     trace(T_pvoutput,45);
-    energyImported = nextPostRecord.accum1[config.mainsChannel] - prevDayRecord.accum1[config.mainsChannel];
+    energyImported = nextPostRecord.accum1[config.mainsChannel] - dayStartRecord.accum1[config.mainsChannel];
   }
 
   // Example:
@@ -1177,17 +1184,17 @@ bool PVOutput::CollectNextDataPoint()
 
   // Otherwise we have some data we need to POST, get the remaining data and
   // prepare the request
-  IotaLogRecord prevDayRecord;
-  if (!ReadSaneLogRecordOrPrev(&prevDayRecord, unixPrevDay))
+  IotaLogRecord dayStartRecord;
+  if (!ReadSaneLogRecordOrPrev(&dayStartRecord, unixDayStart))
   {
     trace(T_pvoutput,74);
-    log("Failed to read prev day log record");
+    log("Failed to read day start log record");
     // Dont move forward on failure so we get a bug report
     return false;
   }
 
   Entry entry;
-  if (!CalculateEntry(&entry, prevPostRecord, nextPostRecord, prevDayRecord))
+  if (!CalculateEntry(&entry, prevPostRecord, nextPostRecord, dayStartRecord))
   {
     trace(T_pvoutput,75);
     // Dont move forward on failure so we get a bug report
@@ -1357,13 +1364,25 @@ uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
         // Break to treat as success case resulting in data being skipped
         break;
 
+      // @todo Add back in after testing. For now if we see this may be a bug
+      //case PVOutputError::MOON_POWERED:
+      //  trace(T_pvoutput,86);
+      //  log("Skipping data that PVOutput thinks is invalid. Fall through treat like success case");
+      //  // Break to treat as success case resulting in data being skipped
+      //  break;
+
       // In these cases we will retry sending after a small wait
       case PVOutputError::DATE_IN_FUTURE:
       case PVOutputError::RATE_LIMIT:
-        // Retry upto 10 times and then fall through to reset
+        // Retry upto 2 hours worth and then fall through to reset
+        // The extra time is because the DATE_IN_FUTURE is a common error when IoTaWatt is 
+        // using the incorrect local time due to daylight savings (currently no support to handle that)
+        //
+        // There are issues with the midnight time boundary and PVOutput I have seen 
+        // it fail with DATE_IN_FUTURE upto 1 hour past expected time.
         trace(T_pvoutput,87);
         ++retryCount;
-        if (retryCount < 10)
+        if (retryCount < ((2 * 60 * 60) / config.reportInterval) + 2)
         {
           trace(T_pvoutput,88);
           SetState(State::POST_DATA);
