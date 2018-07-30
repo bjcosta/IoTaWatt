@@ -3,8 +3,18 @@
 #include <assert.h>
 
 #define ENABLE_HTTP_DEBUG false
+
+// We use c1=0 as for cumuliative posts there is a limit of 200kWh for the overall accumulation
+// This will stop working after about 10 days
+//
+// We also use n=0 as we can easily calculate the values ourselves and it doesn't work
+// for energy anyway only for the power reports.
 static const char* PVOUTPUT_POST_DATA_PREFIX = "c1=0&n=0&data=";
 static const uint16_t MAX_BULK_SEND = 30;
+
+// Max permitted time in the past for a POST is 14 days
+// We will set max to 13 days for now
+static const uint32_t MAX_PAST_POST_TIME = 13 * 24 * 60 * 60;
 
 // @todo Ask Bob to make the state enums public
 // Copied from asyncHTTPrequest as it is not public for some reason but states used all over the place as int literals
@@ -89,6 +99,10 @@ private:
   struct Entry
   {
     uint32_t unixTime;
+
+    // The above unix time as a local date time
+    DateTime dt;
+
     double voltage;
     double energyConsumed;
     double powerConsumed;
@@ -112,6 +126,8 @@ private:
   static PVOutputError InterpretPVOutputError(int responseCode, const String& responseText);
   static const char* ParseFixedInteger(char* tmp, const char* src, size_t size, int* value, int min, int max);
   static const char* ParseExpectedCharacter(const char* src, char expected);
+  static const char* ParseStringUpto(const char* src, char delim, const char** fieldString, size_t* fieldStringSize);
+
   static bool ParseGetStatusResponse(const String& responseText, DateTime* dt);
   uint32_t CalculateDayStart(uint32_t ts);
   static bool ReadSaneLogRecordOrPrev(IotaLogRecord* record, uint32_t when);
@@ -239,6 +255,7 @@ bool PVOutput::UpdateConfig(const char* jsonText)
   config.solarChannel = configJson["solarChannel"].as<int>();
   config.httpTimeout = configJson["httpTimeout"].as<unsigned int>();
   config.reportInterval = configJson["reportInterval"].as<int>();
+  // @todo verify that reportInterval is multiple of MIN_REPORT_INTEVAL
 
   delete[] config.apiKey;
   config.apiKey = charstar(configJson["apiKey"].as<const char*>());
@@ -462,6 +479,26 @@ const char* PVOutput::ParseExpectedCharacter(const char* src, char expected)
 }
 
 //=============================================================================
+const char* PVOutput::ParseStringUpto(const char* src, char delim, const char** fieldString, size_t* fieldStringSize)
+{
+  if (src == nullptr)
+    return nullptr;
+
+  *fieldString = src;
+  *fieldStringSize = 0;
+  while (*src != 0 && *src != delim)
+  {
+    ++src;
+    ++(*fieldStringSize);
+  }
+
+  if (*src == 0)
+    return src;
+  else
+    return src + 1;
+}
+
+//=============================================================================
 bool PVOutput::ParseGetStatusResponse(const String& responseText, DateTime* dt)
 {
   // Returns something like: 
@@ -507,6 +544,62 @@ bool PVOutput::ParseGetStatusResponse(const String& responseText, DateTime* dt)
 
   log("Parsed status date/time: %u %u %u %u %u", year, month, day, hour, minute);
   *dt = DateTime(year, month, day, hour, minute, 0);
+
+  // In special case of start of day, we will see if there is any data for energy
+  // If not then assume this is the start of the new day
+  // If so then assume this is the end of prev day and still need to post start of new day
+  // @todo Add back in after testing 
+  //if (dt->hour() == 0 && dt->minute() == 0)
+  {
+    // Now if we can parse a non 0 or non NaN value for either energyConsumption or energyGeneration then
+    // it means that we have a end of day record not a start of day record and we want
+    // to set the datetime to the sentinel <prev-day>:23:59:59
+    bool containsEnergyValues = false;
+    const char* fieldString = nullptr;
+    size_t fieldStringSize = 0;
+
+    // Read Energy Generation
+    src = ParseStringUpto(src, ',', &fieldString, &fieldStringSize);
+    if (strncmp(fieldString, "0", fieldStringSize) != 0 || strncmp(fieldString, "NaN", fieldStringSize) != 0)
+    {
+      containsEnergyValues = true;
+    }
+
+    // Read Power Generation
+    src = ParseStringUpto(src, ',', &fieldString, &fieldStringSize);
+
+    // Read Energy Consumption
+    src = ParseStringUpto(src, ',', &fieldString, &fieldStringSize);
+    if (strncmp(fieldString, "0", fieldStringSize) != 0 || strncmp(fieldString, "NaN", fieldStringSize) != 0)
+    {
+      containsEnergyValues = true;
+    }
+
+
+    // @todo remove this if after testing
+    if (dt->hour() == 0 && dt->minute() == 0)
+    {
+
+      // For the following posts we get:
+      // curl -d "c1=0&n=0&d=20180724&t=23:59&v1=1000&v2=0&v3=1200&v4=100" https://pvoutput.org/service/r2/addstatus.jsp
+      // curl "http://pvoutput.org/service/r2/getstatus.jsp"
+      // Returns: 20180725,00:00,1000,0,1200,100,NaN,NaN,NaN
+      //
+      // curl -d "c1=0&n=0&d=20180725&t=00:00&v1=0&v2=0&v3=0&v4=0" https://pvoutput.org/service/r2/addstatus.jsp
+      // curl "http://pvoutput.org/service/r2/getstatus.jsp"
+      // Returns: 20180725,00:00,0,0,0,0,NaN,NaN,NaN
+      if (containsEnergyValues)
+      {
+        // We need to use the prev day 23:59:59 sentinel as this record read is a end-of-day not a start-of-day record
+        // Though PVOutput reports 00:00:00 of next day with non-zero energy values
+
+        // Move back to the sentinel time (is just 1 sec before 00:00:00, i.e. 23:59:59)
+        uint32_t tmp = dt->unixtime() - 1;
+        *dt = DateTime(tmp);
+      }
+    }
+  }
+
   return true;
 }
 
@@ -586,7 +679,7 @@ uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
   }
 
   // Send the request
-  log("curl -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/getstatus.jsp\"", config.apiKey, config.systemId);
+  log("curl -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/getstatus.jsp\"", "<private>", config.systemId);
   if (!request->send(&reqData, reqData.available()))
   {
     // Try again in a little while
@@ -657,40 +750,54 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   }
 
   // The datetime was given by PVOutput in local time, we need to adjust to UTC
-  unixPrevPost = dt.unixtime() - (localTimeDiff * 3600);
-  if (unixPrevPost == 0)
+  unixPrevPost = dt.unixtime()  - (localTimeDiff * 3600);
+
+  // Cases we care about:
+  // * get normal : prev=get, next=get+interval, day=day of prev(or day of next after adjust) : adjust for span day boundary
+  //    Might end up with a 23:59 after adjust for span day boundary(23:59)
+  // * get 23:59:59 day end : prev=00-interval(not accurate), next=00:00, day=day of 00:00 (0 energy)
+  // * get 00:00:00 day start (same as normal): prev=00, next=00+interval, day=day of 00:00 (basically same as normal but adjust not required)
+  if (dt.hour() == 23 && dt.minute() == 59 && dt.second() == 59)
   {
-    trace(T_pvoutput,32);
-    log("unixPrevPost is 0, something is wrong");
-    // @todo Other iota code sets prev post to now. I think I will just have error and fix bug
-    SetState(State::QUERY_GET_STATUS);
-    return UNIXtime() + 1;
-  }
+    // Special case, already posted day end, now need to post day start
 
-  // Max permitted time in the past for a POST is 14 days
-  // We will set max to 13 days for now
-  // @todo Move to top of file consts and rename to something better
-  static const uint32_t MAX_PAST_POST_TIME = 13 * 24 * 60 * 60;
-  if (unixPrevPost + MAX_PAST_POST_TIME < UNIXtime())
+    // The next post is to be 00:00:00 (which is 1 sec in the future of the read prev post from get status)
+    unixPrevPost += 1;
+    unixNextPost = unixPrevPost;
+
+    // The prev post needs to be one report interval in the past from 00:00:00 (If using 5 min intervals this is 23:55:00)
+    // This actually should be whatever the prev post interval was used to report 23:59:59, but we dont have that information
+    // We are assuming the report interval hasn't changed since the post that was reported to PVOutput. This is not
+    // necessarily correct but usually correct. Getting this wrong means the energy values are accurate but the instant power
+    // usage values for the 00:00:00 post may not be correct but instead based on the current reporting interval which is
+    // close enough.
+    //
+    // Because it is an instantaneous value, it has no bearing on overall power usage for the day.
+    unixPrevPost = unixPrevPost - config.reportInterval;
+    unixPrevPost -= unixPrevPost % config.reportInterval;
+  }
+  else
   {
-    trace(T_pvoutput,33);
-    log("unixPrevPost is too old, we are setting it to a time that will be accepted by PVOutput");
-    unixPrevPost = UNIXtime() - MAX_PAST_POST_TIME;
+    // Adjust to a report interval boundary (only really matters if changing interval)
+    unixPrevPost -= unixPrevPost % config.reportInterval;
+    unixNextPost = unixPrevPost + config.reportInterval;
+
+    // If the prev/next crosses a day boundary then set next to 23:59:59
+    DateTime prevDt(unixPrevPost + (localTimeDiff * 3600));
+    DateTime nextDt(unixNextPost + (localTimeDiff * 3600));
+    if (prevDt.year() != nextDt.year() || prevDt.month() != nextDt.month() || prevDt.day() != nextDt.day())
+    {
+      // Spans a day boundary, adjust to 23:59 as a special case to post the last entry in the prev day
+      nextDt = DateTime(prevDt.year(), prevDt.month(), prevDt.day(), 23, 59, 59);
+    }
+
+    unixDayStart = CalculateDayStart(unixNextPost);
   }
-
-  // Adjust to a report interval boundary
-  unixPrevPost -= unixPrevPost % config.reportInterval;
-
-  trace(T_pvoutput,34);
-  // Identify when the next post interval will start
-  unixNextPost = unixPrevPost + config.reportInterval;
-  unixNextPost = unixNextPost - (unixNextPost % config.reportInterval);
 
   // For pvoutput we have to report energy accumulated each day (in addition to accumulated since last tick), 
   // so we need to read the last record seen the day before and use that as the "reference"
   // When the day ticks over, then we will update the reference
   trace(T_pvoutput,35);
-  unixDayStart = CalculateDayStart(unixNextPost);
   log("unixDayStart: %s, unixPrevPost: %s, unixNextPost: %s, now: %s, lastKey: %s", 
     dateString(unixDayStart).c_str(),
     dateString(unixPrevPost).c_str(),
@@ -703,7 +810,7 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   assert(reqEntries == 0);
   reqData.write(PVOUTPUT_POST_DATA_PREFIX);
   SetState(State::COLLATE_DATA);
-  return unixNextPost;
+  return unixNextPost + 1;
 }
 
 //=============================================================================
@@ -762,28 +869,105 @@ bool PVOutput::ReadSaneLogRecordOrPrev(IotaLogRecord* record, uint32_t when)
 //=============================================================================
 void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryDebug)
 {
-  unixPrevPost = unixNextPost;
-  unixNextPost = unixPrevPost + (incrementPeriods * config.reportInterval);
-  
-  // Adjust to a report interval boundary
-  unixNextPost -= unixNextPost % config.reportInterval;
-
-  // If we move to a new day, then update dayStartRecord
+  // Cases we care about:
+  // unixNextPost 23:59:59: prev:<keep old: 23:55:00>, next:00:00:00, day: new (day of next)
+  // unixNextPost (normal): prev=next, next=next+interval (adjust day boundary), day=day of next (after adjust)
   DateTime localPrevPostDt(unixPrevPost + (localTimeDiff * 3600));
   DateTime localNextPostDt(unixNextPost + (localTimeDiff * 3600));
+
+  if (localNextPostDt.hour() == 23 && localNextPostDt.minute() == 59 && localNextPostDt.second() == 59)
+  {
+    // Keep same previous (for power values)
+    // Get a new day (used for energy calcs) : Will come from unixNextPost
+
+    // One second should move to 00:00:00 of next day
+    unixNextPost = unixNextPost + 1;
+    localNextPostDt = DateTime(unixNextPost + (localTimeDiff * 3600));
+
+    // Expect the date to change
+    assert(
+      localPrevPostDt.year() != localNextPostDt.year()
+      || localPrevPostDt.month() != localNextPostDt.month()
+      || localPrevPostDt.day() != localNextPostDt.day());
+
+    // Expect to be time 00:00:00
+    assert(
+      localNextPostDt.hour() == 0
+      || localNextPostDt.minute() == 0
+      || localNextPostDt.second() == 0);
+
+    // Note: If incrementPeriods > 1 then we will still just increment one for now. This is a special case we shouldnt skip
+  }
+  else
+  {
+  	// @todo I think this can be simplified a bit
+    // Otherwise just do a normal increment but handle crossing the day boundary
+    unixNextPost += (incrementPeriods * config.reportInterval);
+    //log("unixNextPost: %u, mod: %u local next: %s", (unsigned int)unixNextPost, (unsigned int)(unixNextPost % config.reportInterval), dateString(unixNextPost).c_str());
+    //if (!((unixNextPost % config.reportInterval) == 0))
+    //{
+    //  log("ERROR ASSERT LOST LOGS");
+    //}
+    assert((unixNextPost % config.reportInterval) == 0);
+    localPrevPostDt = localNextPostDt;
+    localNextPostDt = DateTime(unixNextPost + (localTimeDiff * 3600));
+    if (localPrevPostDt.year() != localNextPostDt.year() 
+      || localPrevPostDt.month() != localNextPostDt.month()
+      || localPrevPostDt.day() != localNextPostDt.day())
+    {
+      // Date changed, need to handle this specially by setting next to either 23:59:59 of prev day or 00:00:00 of current day 
+      // in order to post the special day end or day start entries.
+      //
+      // If just incrementing by 1 period the case of 00:00:00 is not relevant as we always want to post day-end, 
+      // however because we can skip multiple days when there is no data in the log we may not want an entry at 
+      // the end of the previous day as there may be no data in the IoTa log for that day.
+      //
+      // We will look at prev day and the day before next day and determine if we need to post prev day
+
+      // Notice the localNextPostDt.unixtime() - 1 that will set to 23:59:59 of the day before the day next is in
+      localNextPostDt = DateTime(localNextPostDt.year(), localNextPostDt.month(), localNextPostDt.day(), 0, 0, 0);
+      unixNextPost = (localNextPostDt.unixtime() - 1)  - (localTimeDiff * 3600);
+
+      // If the day before next is the same day as prev, then we need 23:59:59 to finish off that day
+      // otherwise we just skip it and move to 00:00:00 to start the new day
+      DateTime dtDayBeforeNext(unixNextPost + (localTimeDiff * 3600));
+      if (dtDayBeforeNext.year() != localPrevPostDt.year()
+        || dtDayBeforeNext.month() != localPrevPostDt.month()
+        || dtDayBeforeNext.day() != localPrevPostDt.day())
+      {
+        // Move from 23:59:59 to 00:00:00 of the next day
+        unixNextPost += 1;
+        localNextPostDt = DateTime(unixNextPost + (localTimeDiff * 3600));
+        unixPrevPost = unixNextPost - config.reportInterval;
+        log("Date changed between prev: %s and next: %s and there is no data in day before next, so moving to day-start-post 00:00:00 of next day", dateString(unixPrevPost).c_str(), dateString(unixNextPost).c_str());
+      }
+      else
+      {
+        // stay with 23:59:59 of the day before next to do a day-end post
+        log("Date changed between prev: %s and next: %s and there is some data in day before next, so moving to do day-end-post 23:59:59 of day before next", dateString(unixPrevPost).c_str(), dateString(unixNextPost).c_str());
+        unixPrevPost = unixNextPost + 1 - config.reportInterval;
+      }
+    }
+    else
+    {
+      unixPrevPost = unixNextPost - config.reportInterval;
+    }
+
+    localPrevPostDt = DateTime(unixPrevPost + (localTimeDiff * 3600));
+  }
 
   const char* message = "";
   if (localPrevPostDt.day() != localNextPostDt.day() || localPrevPostDt.month() != localNextPostDt.month() || localPrevPostDt.year() != localNextPostDt.year())
   {
     trace(T_pvoutput,41);
     message = "Started a new day for log accumulation";
-    unixDayStart = CalculateDayStart(unixNextPost);
   }
   else
   {
     trace(T_pvoutput,42);
     message = "Still in same day for log accumulation";
   }
+  unixDayStart = CalculateDayStart(unixNextPost);
 
   log("Entry: %s : %s : After incrementing %u periods the new values are: unixDayStart: %s, unixPrevPost: %s, unixNextPost: %s, now: %s, lastKey: %s", 
     entryDebug,
@@ -800,8 +984,13 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
 //=============================================================================
 bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& dayStartRecord) const
 {
-  // @todo Is this correct or should it be unixPrevPost and we adjust all the prev/next logic (particulary on GetStatus)?
+  // Entry is for unixNextTime and reports data from the last config.reportInterval time
   entry->unixTime = unixNextPost;
+
+  // @todo I think we can remove this from entry again now
+  // PVOutput requires localized time, include it in the entry
+  uint32_t localUnixTime = entry->unixTime + (localTimeDiff * 3600);
+  entry->dt = DateTime(localUnixTime);
 
   // The measurements should be such that:
   // chan 1 : mains +ve indicates net import -ve indicates net export
@@ -915,10 +1104,6 @@ String PVOutput::GenerateEntryString(Entry entry)
   entry.energyGenerated *= -1;
   entry.powerGenerated *= -1;
 
-  // PVOutput requires localized time
-  uint32_t localUnixTime = entry.unixTime + (localTimeDiff * 3600);
-  DateTime dt(localUnixTime);
-
   // Now sanity check the data so we dont get PVOutput infinite POST loop
   // due to known problems
   if(entry.energyGenerated < 0.0) 
@@ -950,11 +1135,11 @@ String PVOutput::GenerateEntryString(Entry entry)
   }
 
   char dateStr[10];
-  snprintf(dateStr, sizeof(dateStr), "%04u%02u%02u", dt.year(), dt.month(), dt.day());
+  snprintf(dateStr, sizeof(dateStr), "%04u%02u%02u", entry.dt.year(), entry.dt.month(), entry.dt.day());
   dateStr[sizeof(dateStr) - 1] = 0;
 
   char timeStr[10];
-  snprintf(timeStr, sizeof(timeStr), "%02u:%02u", dt.hour(), dt.minute());
+  snprintf(timeStr, sizeof(timeStr), "%02u:%02u", entry.dt.hour(), entry.dt.minute());
   timeStr[sizeof(timeStr) - 1] = 0;
 
   //Date	Yes	yyyymmdd	date	20100830	r1	
@@ -1077,7 +1262,7 @@ size_t PVOutput::CalculateMissingPeriodsToSkip(IotaLogRecord& prevPostRecord, Io
     dateString(unixPrevPost).c_str(),
     nextPostRecord.serial,
     dateString(nextPostRecord.UNIXtime).c_str(),
-    dateString(unixPrevPost).c_str()
+    dateString(unixNextPost).c_str()
   );
 
   // To make it clearer will rename to "currentPostTime"
@@ -1151,6 +1336,19 @@ void PVOutput::WriteEntryString(const String& entry_str)
 //=============================================================================
 bool PVOutput::CollectNextDataPoint()
 {
+  // Make sure it is not older than max addstatus API will permit us to post
+  uint32_t now = UNIXtime();
+  if (unixNextPost + MAX_PAST_POST_TIME < now)
+  {
+    trace(T_pvoutput,33);
+    uint32_t oldestAcceptable = now - MAX_PAST_POST_TIME;
+    uint32_t diff = oldestAcceptable - unixNextPost;
+    size_t periodsToSkip = (diff / config.reportInterval) + 1;
+    log("unixNextPost: %s is too old and PVOutput API will not accept this data, we are going to skip: %u periods to set it to a time that will be accepted by PVOutput", dateString(unixNextPost).c_str(), (unsigned int)periodsToSkip);
+    IncrementTimeInterval(periodsToSkip, "<no entry> Unposted data too far in past, PVOutput API wont accept it so skipping");
+    return true;  
+  }
+
   IotaLogRecord prevPostRecord;
   if (!ReadSaneLogRecordOrPrev(&prevPostRecord, unixPrevPost))
   {
@@ -1160,8 +1358,15 @@ bool PVOutput::CollectNextDataPoint()
     return false;
   }
 
+  // Special case for day end entry, we will read at time 00:00:00 and post it for 23:59:59
+  DateTime localNextPostDt(unixNextPost + (localTimeDiff * 3600));
+  uint32_t additional_time = 0;
+  if (localNextPostDt.hour() == 23 && localNextPostDt.minute() == 59 && localNextPostDt.second() == 59)
+  {
+    additional_time = 1;
+  }
   IotaLogRecord nextPostRecord;
-  if (!ReadSaneLogRecordOrPrev(&nextPostRecord, unixNextPost))
+  if (!ReadSaneLogRecordOrPrev(&nextPostRecord, unixNextPost + additional_time))
   {
     trace(T_pvoutput,71);
     log("Failed to read next post log record");
@@ -1172,12 +1377,14 @@ bool PVOutput::CollectNextDataPoint()
   // Compute the time difference between log entries.
   // If zero, then IoTa wasn't running during that period we will skip posting for it and 
   // potentially more periods depending on how long the hole in the IoTa log is
+  //
+  // Note: When we have a gap, we will post the day start entry so we must not skip the 00:00:00 record
   double elapsedHours = nextPostRecord.logHours - prevPostRecord.logHours;
-  if(elapsedHours == 0)
+  if(elapsedHours == 0 && !(localNextPostDt.hour() == 0 && localNextPostDt.minute() == 0 && localNextPostDt.second() == 0))
   {
     trace(T_pvoutput,72);
     size_t periodsToSkip = CalculateMissingPeriodsToSkip(prevPostRecord, nextPostRecord);
-    IncrementTimeInterval(periodsToSkip, "");
+    IncrementTimeInterval(periodsToSkip, "<no entry> Skipping empty IoTa log entries");
     return true;  
   }
   trace(T_pvoutput,73);
@@ -1314,7 +1521,7 @@ uint32_t PVOutput::TickPostData(struct serviceBlock* serviceBlock)
 
   trace(T_pvoutput,81);
   // @todo check bool error
-  log("curl -d \"%s\" -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/addbatchstatus.jsp\"", reqData.peekString().c_str(), config.apiKey, config.systemId);
+  log("curl -d \"%s\" -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/addbatchstatus.jsp\"", reqData.peekString().c_str(), "<private>", config.systemId);
   if (!request->send(&reqData, reqData.available()))
   {
     // Try again in a little while
