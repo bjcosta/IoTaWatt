@@ -50,43 +50,54 @@
   ----------------------------------------------------------------------------------------------------------------
 */
 
-const char P_txtPlain[] PROGMEM = "text/plain";
-const char P_appJson[]  PROGMEM = "application/json";
-const char P_txtJson[]  PROGMEM = "text/json";
+const char txtPlain_P[] PROGMEM = "text/plain";
+const char appJson_P[]  PROGMEM = "application/json";
+const char txtJson_P[]  PROGMEM = "text/json";
+
+bool authenticate(authLevel level){
+  if(auth(level)){
+    return true;
+  } 
+  requestAuth();
+  return false;
+}
 
     /* handleRequest - basic gatekeeper to administrate authorization */
 
 void handleRequest(){
   String uri = server.uri();
-  if(uri.equals("/") || uri.equals("/index.htm") || uri.equals("/cnfstyle.css")){
-    if(! loadFromSdCard(uri)){
-      returnFail("");
-    }
-  }
-  /*
-  if( ! server.authenticate("admin","admin")){
-    server.requestAuthentication(BASIC_AUTH);
+      
+  if(serverOn(authAdmin, F("/status"),HTTP_GET, handleStatus)) return;
+  if(serverOn(authAdmin, F("/vcal"),HTTP_GET, handleVcal)) return;
+  if(serverOn(authAdmin, F("/command"), HTTP_GET, handleCommand)) return;
+  if(serverOn(authUser, F("/list"), HTTP_GET, printDirectory)) return;
+  if(serverOn(authAdmin, F("/config"), HTTP_GET, handleGetConfig)) return;
+  if(serverOn(authAdmin, F("/edit"), HTTP_DELETE, handleDelete)) return;
+  if(serverOn(authAdmin, F("/edit"), HTTP_PUT, handleCreate)) return;
+  if(serverOn(authUser, F("/feed/list.json"), HTTP_GET, handleGetFeedList)) return;
+  if(serverOn(authUser, F("/feed/data.json"), HTTP_GET, handleGetFeedData)) return;
+  if(serverOn(authAdmin, F("/graph/create"),HTTP_POST, handleGraphCreate)) return;
+  if(serverOn(authAdmin, F("/graph/update"),HTTP_POST, handleGraphCreate)) return;
+  if(serverOn(authAdmin, F("/graph/delete"),HTTP_POST, handleGraphDelete)) return;
+  if(serverOn(authUser, F("/graph/getall"), HTTP_GET, handleGraphGetall)) return;
+  if(serverOn(authAdmin, F("/auth"), HTTP_POST, handlePasswords)) return;
+  if(serverOn(authUser, F("/nullreq"), HTTP_GET, returnOK)) return;
+
+  if(loadFromSdCard(uri)){
     return;
   }
-  */
-  if(serverOn(F("/status"),HTTP_GET, handleStatus)) return;
-  if(serverOn(F("/vcal"),HTTP_GET, handleVcal)) return;
-  if(serverOn(F("/command"), HTTP_GET, handleCommand)) return;
-  if(serverOn(F("/list"), HTTP_GET, printDirectory)) return;
-  if(serverOn(F("/config"), HTTP_GET, handleGetConfig)) return;
-  if(serverOn(F("/edit"), HTTP_DELETE, handleDelete)) return;
-  if(serverOn(F("/edit"), HTTP_PUT, handleCreate)) return;
-  if(serverOn(F("/feed/list.json"), HTTP_GET, handleGetFeedList)) return;
-  if(serverOn(F("/feed/data.json"), HTTP_GET, handleGetFeedData)) return;
-  if(serverOn(F("/graph/create"),HTTP_POST, handleGraphCreate)) return;
-  if(serverOn(F("/graph/update"),HTTP_POST, handleGraphCreate)) return;
-  if(serverOn(F("/graph/delete"),HTTP_POST, handleGraphDelete)) return;
-  if(serverOn(F("/graph/getall"), HTTP_GET, handleGraphGetall)) return;
-  handleNotFound();   
+  
+  trace(T_WEB,12); 
+  String message = "Not found: ";
+  message += (server.method() == HTTP_GET)?"GET":"POST";
+  message += ", URI: ";
+  message += server.uri();
+  server.send(404, txtPlain_P, message);
 }
 
-bool serverOn(const __FlashStringHelper* uri, HTTPMethod method, genericHandler fn){
+bool serverOn(authLevel level, const __FlashStringHelper* uri, HTTPMethod method, genericHandler fn){
   if(strcmp_P(server.uri().c_str(),(PGM_P)uri) == 0 && server.method() == method){
+    if( ! authenticate(level)) return true;
     fn();
     return true;
   }
@@ -94,23 +105,22 @@ bool serverOn(const __FlashStringHelper* uri, HTTPMethod method, genericHandler 
 }
 
 void returnOK() {
-  server.send(200, P_txtPlain, "");
+  server.send(200, txtPlain_P, "");
 }
 
 void returnFail(String msg) {
-  server.send(500, P_txtPlain, msg + "\r\n");
+  server.send(500, txtPlain_P, msg + "\r\n");
 }
 
 bool loadFromSdCard(String path){
   trace(T_WEB,13);
   if( ! path.startsWith("/")) path = '/' + path;
-  String dataType = P_txtPlain;
+  String dataType = txtPlain_P;
   if(path.endsWith("/")) path += "index.htm";
-  if(path == "/edit" ||
-     path == "/graph"){
-      path += ".htm";
-     }
-
+  if(path == "/edit" || path == "/graph"){
+    path += ".htm";
+  }
+  
   if(path.endsWith(".src")) path = path.substring(0, path.lastIndexOf("."));
   else if(path.endsWith(".htm")) dataType = F("text/html");
   else if(path.endsWith(".css")) dataType = F("text/css");
@@ -130,14 +140,24 @@ bool loadFromSdCard(String path){
     dataFile = SD.open(path.c_str());
   }
 
-  if (!dataFile)
+  if (!dataFile){
     return false;
-    
+  }
+
+          // If reading user directory,
+          // authenticate as user
+          // otherwise require admin.
+
+  authLevel level = authAdmin;
+  if(path.startsWith("/user/")){
+    level = authUser;
+  }
+  if( ! authenticate(level)) return true;
+
   if (server.hasArg("download")) dataType = F("application/octet-stream");
 
   if(server.hasArg("textpos")){
     sendMsgFile(dataFile, server.arg("textpos").toInt());
-    return true;
   }
 
   else {
@@ -155,20 +175,15 @@ bool loadFromSdCard(String path){
 
 void handleFileUpload(){
   trace(T_WEB,11);
-  /*
-  if( ! server.authenticate("admin","admin")){
-    server.requestAuthentication(BASIC_AUTH);
-    return;
-  }
-  */
   if(server.uri() != "/edit") return;
   HTTPUpload& upload = server.upload();
   if(upload.status == UPLOAD_FILE_START){
+    if( ! authenticate(authAdmin)) return;
     if(upload.filename.equalsIgnoreCase("config.txt") ||
-        upload.filename.equalsIgnoreCase("/config.txt")){ 
-      if(server.hasArg(F("configSHA256"))){
-        if(server.arg(F("configSHA256")) != base64encode(configSHA256, 32)){
-          server.send(409, P_txtPlain, "Config not current");
+        upload.filename.equalsIgnoreCase("/config.txt")){
+      if(server.hasHeader(F("X-configSHA256"))){
+        if(server.header(F("X-configSHA256")) != base64encode(configSHA256, 32)){
+          server.send(409, txtPlain_P, "Config not current");
           return;
         }
       }
@@ -294,20 +309,8 @@ void printDirectory() {
   }  
   String response = "";
   array.printTo(response);
-  server.send(200, P_appJson, response);
+  server.send(200, appJson_P, response);
   dir.close();
-}
-
-void handleNotFound(){
-  trace(T_WEB,12); 
-  // String serverURI = server.uri();
-  if(loadFromSdCard(server.uri())) return;
-  String message = "Not found: ";
-  message += (server.method() == HTTP_GET)?"GET":"POST";
-  message += ", URI: ";
-  message += server.uri();
-  server.send(404, P_txtPlain, message);
-  // Serial.println(message);
 }
 
 /************************************************************************************************
@@ -315,6 +318,60 @@ void handleNotFound(){
  * Following handlers added to WebServer for IotaWatt specific requests
  * 
  **********************************************************************************************/
+
+void handlePasswords(){
+  trace(T_WEB,21);
+  int len = server.arg("plain").length();
+  char* buff = new char[(len + 2) * 3 / 4];
+  len = base64_decode_chars(server.arg("plain").c_str(), len, buff);
+  buff[len] = 0;
+  String body = buff;
+  delete[] buff;
+  DynamicJsonBuffer Json;
+  JsonObject& request = Json.parseObject(body);
+  if( ! request.success()){
+    server.send(400, txtPlain_P, "Json parse failed.");
+    return;
+  }
+  if(adminH1){
+    String testH1 = calcH1("admin", deviceName, request["oldadmin"].as<char*>());
+    if( adminH1 && ! testH1.equals(bin2hex(adminH1,16))){
+      server.send(400, txtPlain_P, F("Current admin password invalid."));
+      return;
+    }
+  }
+  
+  if(request.containsKey("newadmin")){
+    delete[] adminH1;
+    adminH1 = nullptr;
+    delete[] userH1;
+    userH1 = nullptr;
+    String newAdmin = request["newadmin"].as<char*>();
+    if(newAdmin.length()){
+      String newAdminH1 = calcH1("admin", deviceName, request["newadmin"].as<char*>());
+      adminH1 = new uint8_t[16];
+      hex2bin(adminH1, newAdminH1.c_str(), 16);
+    } 
+    if(request.containsKey("newuser")){
+      String newAdmin = request["newuser"].as<char*>();
+      if(newAdmin.length()){
+        String newUserH1 = calcH1("user", deviceName, request["newuser"].as<char*>());
+        userH1 = new uint8_t[16];
+        hex2bin(userH1, newUserH1.c_str(), 16);
+      } 
+    }
+    if(authSavePwds()){
+      server.send(200, txtPlain_P, F("Passwords reset."));
+      log("New passwords saved.");
+    } else {
+      server.send(400, txtPlain_P, F("Error saving passwords."));
+      log("Password save failed.");
+    } 
+  } else {
+    server.send(200, txtPlain_P, "");
+  } 
+  return;
+}
 
 void handleStatus(){
   trace(T_WEB,0); 
@@ -392,8 +449,16 @@ void handleStatus(){
     root["influx"] = influx;
   }
 
+  if(server.hasArg(F("emon"))){
+    trace(T_WEB,22);
+    JsonObject& emon = jsonBuffer.createObject();
+    emon.set(F("running"),EmonStarted);
+    emon.set(F("lastpost"),EmonLastPost);  
+    root["emon"] = emon;
+  }
+
   if(server.hasArg(F("pvoutput"))){
-    trace(T_WEB,17); // @todo
+    trace(T_WEB,23); // @todo
     JsonObject& pvoutput = jsonBuffer.createObject();
     PVOutputGetStatusJson(pvoutput);
     root["pvoutput"] = pvoutput;
@@ -419,15 +484,23 @@ void handleStatus(){
     root.set(F("datalogs"),datalogs);
   }
 
+  if(server.hasArg(F("passwords"))){
+    trace(T_WEB,18);
+    JsonObject& passwords = jsonBuffer.createObject();
+    passwords.set(F("admin"),adminH1 != nullptr);
+    passwords.set(F("user"),userH1 != nullptr);  
+    root["passwords"] = passwords;
+  }
+
   String response = "";
   root.printTo(response);
-  server.send(200, P_txtJson, response);  
+  server.send(200, txtJson_P, response);  
 }
 
 void handleVcal(){
   trace(T_WEB,1); 
   if( ! (server.hasArg(F("channel")) && server.hasArg("cal"))){
-    server.send(400, P_txtJson, F("Missing parameters"));
+    server.send(400, txtJson_P, F("Missing parameters"));
     return;
   }
   DynamicJsonBuffer jsonBuffer;
@@ -437,7 +510,7 @@ void handleVcal(){
   root.set("vrms",Vrms);
   String response = "";
   root.printTo(response);
-  server.send(200, P_txtJson, response);  
+  server.send(200, txtJson_P, response);  
 }
 
 void handleCommand(){
@@ -460,18 +533,21 @@ void handleCommand(){
     if(server.hasArg(F("shift"))){
       shift = server.arg(F("shift")).toInt();
     }
-    server.send(200, P_txtPlain, samplePhase(refChan, chan, shift));
+    server.send(200, txtPlain_P, samplePhase(refChan, chan, shift));
     return; 
   }
   if(server.hasArg(F("sample"))){
     trace(T_WEB,5); 
     uint16_t chan = server.arg(F("sample")).toInt();
     samplePower(chan,0);
+    /*
     String response = String(samples) + "\n\r";
     for(int i=0; i<samples; i++){
       response += String(Vsample[i]) + "," + String(Isample[i]) + "\r\n";
     }
-    server.send(200, P_txtPlain, response);
+    server.send(200, txtPlain_P, response);*/
+    getSamples();
+
     return; 
   }
   if (server.hasArg("channel")) {
@@ -511,7 +587,7 @@ void handleCommand(){
   }
   if(server.hasArg(F("disconnect"))) {
     trace(T_WEB,6); 
-    server.send(200, P_txtPlain, "ok");
+    server.send(200, txtPlain_P, "ok");
     log("Disconnect command received.");
     WiFi.disconnect(false);
     return;
@@ -529,7 +605,7 @@ void handleCommand(){
     }
     if(server.arg(F("deletelog")) == "history"){
       trace(T_WEB,21); 
-      server.send(200, P_txtPlain, "ok");
+      server.send(200, txtPlain_P, "ok");
       log("delete history log command received.");
       histLog.end();
       deleteRecursive(String(historyLogFile) + ".log");
@@ -539,7 +615,7 @@ void handleCommand(){
     }
     
   }
-  server.send(400, P_txtJson, F("Unrecognized request"));
+  server.send(400, txtJson_P, F("Unrecognized request"));
 }
 
 void handleGetFeedList(){ 
@@ -575,7 +651,7 @@ void handleGetFeedList(){
   int outndx = 100;
   while(script){
     if(String(script->name()).indexOf(' ') == -1){
-      String units = String(script->getUnits());
+      String units = script->getUnits();
       if(units.equalsIgnoreCase("volts")){
         JsonObject& voltage = jsonBuffer.createObject();
         voltage["id"] = String("OV") + String(script->name());
@@ -584,7 +660,6 @@ void handleGetFeedList(){
         array.add(voltage);
       } 
       else if(units.equalsIgnoreCase("watts")) {
-        
         JsonObject& power = jsonBuffer.createObject();
         power["id"] = String("OP") + String(script->name());
         power["tag"] = F("Power");
@@ -609,13 +684,12 @@ void handleGetFeedList(){
   
   String response;
   array.printTo(response);
-  server.send(200, P_appJson,response);
+  server.send(200, appJson_P,response);
 }
 
 void handleGetFeedData(){
   serverAvailable = false;
-  HTTPrequestFree--;
-  NewService(getFeedData);
+  getFeedData();
   return;
 }
 
@@ -634,7 +708,7 @@ void sendMsgFile(File &dataFile, int32_t relPos){
     }
     absPos = dataFile.position();
     server.setContentLength(dataFile.size() - absPos);
-    server.send(200, P_txtPlain, "");
+    server.send(200, txtPlain_P, "");
     WiFiClient _client = server.client();
     _client.write(dataFile);
 }
@@ -650,9 +724,23 @@ void handleGetConfig(){
     }
     else if(server.arg(F("update")) == "reload"){
       getConfig(); 
-      server.send(200, P_txtPlain, "OK");
+      server.send(200, txtPlain_P, "OK");
       return;  
     }
   }
-  server.send(400, P_txtPlain, "Bad Request.");
+  server.send(400, txtPlain_P, "Bad Request.");
+}
+
+        // Seems to work better when sending chunk as a single write
+        // including chunk header, body, and footer (\r\n).
+        // This function accepts a char* buffer and length to send.
+        // Buffer must have 6 bytes free at start for header and
+        // must be long enough to add two byte footer.
+        // bufPos is end of body (chunksize+6).
+
+size_t sendChunk(char* buf, size_t bufPos){
+  sprintf(buf,"%04x\r",bufPos-6);
+  *(buf+5) = '\n';
+  memcpy(buf+bufPos,"\r\n",2);
+  return server.client().write(buf,bufPos+2);
 }

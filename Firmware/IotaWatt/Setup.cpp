@@ -103,7 +103,6 @@ void setup()
   for(int i=0; i<32; i++) trace(0,0);
 
 //************************************* Process Config file *****************************************
-  
   if(!getConfig()) {
     log("Configuration failed");
     dropDead();
@@ -111,10 +110,14 @@ void setup()
   log("Local time zone: %d", localTimeDiff);
   log("device name: %s, version: %d", deviceName, deviceVersion);
 
+//************************************* Load passwords *******************************************
+
+authLoadPwds();  
+
 //*************************************** Start the WiFi  connection *****************************
   
   WiFi.setAutoConnect(true);
-  WiFi.hostname(host);
+  WiFi.hostname();
   WiFi.begin();
   uint32_t autoConnectTimeout = millis() + 3000UL;
   while(WiFi.status() != WL_CONNECTED){
@@ -125,8 +128,7 @@ void setup()
       String ssid = "iota" + String(ESP.getChipId());
       String pwd = deviceName;
       log("Connecting with WiFiManager.");
-
-      wifiManager.autoConnect(ssid.c_str(), pwd.c_str());
+      wifiManager.autoConnect(ssid.c_str(), deviceName);
       endLedCycle();
       while(WiFi.status() != WL_CONNECTED && RTCrunning == false){
         log("RTC not running, waiting for WiFi.");
@@ -145,29 +147,32 @@ void setup()
     
   //*************************************** Start the local DNS service ****************************
 
-  if (MDNS.begin(host.c_str())) {
+  if (MDNS.begin(deviceName)) {
       MDNS.addService("http", "tcp", 80);
       log("MDNS responder started");
-      log("You can now connect to http://%s.local", host.c_str());
+      log("You can now connect to http://%s.local", deviceName);
   }
    
  //*************************************** Start the web server ****************************
 
   SdFile::dateTimeCallback(dateTime);
-  server.on(F("/edit"), HTTP_POST, returnOK,  handleFileUpload);
+  server.on(F("/edit"), HTTP_POST, returnOK, handleFileUpload);
   server.onNotFound(handleRequest);
+  const char * headerkeys[] = {"X-configSHA256"};
+  size_t headerkeyssize = sizeof(headerkeys)/sizeof(char*);
+  server.collectHeaders(headerkeys, headerkeyssize );
   server.begin();
   log("HTTP server started");
   WiFi.mode(WIFI_STA);
   
  //*************************************** Start the logging services *********************************
    
-  NewService(dataLog);
-  NewService(statService);
-  NewService(timeSync);
-  NewService(WiFiService);
-  NewService(updater);
-  NewService(historyLog);
+  NewService(timeSync, T_timeSync);
+  NewService(statService, T_stats);
+  NewService(WiFiService, T_WiFi);
+  NewService(updater, T_UPDATE);
+  NewService(dataLog, T_datalog);
+  NewService(historyLog, T_history);
   
 }  // setup()
 /***************************************** End of Setup **********************************************/

@@ -19,7 +19,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.  
    
 ***********************************************************************************/
-#define IOTAWATT_VERSION "HB_99_04"
+#define IOTAWATT_VERSION "HB_03_13"
 
 #define PRINT(txt,val) Serial.print(txt); Serial.print(val);      // Quick debug aids
 #define PRINTL(txt,val) Serial.print(txt); Serial.println(val);
@@ -32,9 +32,7 @@
 #include <ESP8266mDNS.h>
 #include <DNSServer.h>
 #include <WiFiClient.h>
-//#include <ESP8266HTTPClient.h>
 #include <ESP8266WebServer.h>
-//#include <ESP8266httpUpdate.h>
 #include <ESPAsyncTCP.h>
 #include <asyncHTTPrequest.h>
 
@@ -63,6 +61,7 @@
 #include "samplePower.h"
 #include "influxDB.h"
 #include "Emonservice.h"
+#include "auth.h"
 #include "pvoutput.h"
 
 
@@ -110,9 +109,10 @@ extern uint8_t ADC_selectPin[2];            // indexable reference for ADC selec
 union traceUnion {
       uint32_t    traceWord;
       struct {
-            uint16_t    seq;
+            uint8_t     seq;
             uint8_t     mod;
             uint8_t     id;
+            uint8_t     det;
       };
 };
 
@@ -144,8 +144,11 @@ extern traceUnion traceEntry;
 #define T_base64 15        // base 64 encode
 #define T_EmonConfig 16    // Emon configuration
 #define T_influxConfig 17  // influx configuration 
-#define T_stats 18         // Stat service                      
-#define T_pvoutput 19      // pvoutput
+#define T_stats 18         // Stat service 
+#define T_datalog 19       // datalog service
+#define T_timeSync 20      // timeSync service 
+#define T_WiFi 21          // WiFi service                               
+#define T_pvoutput 22      // pvoutput
 
       // ADC descriptors
 
@@ -154,16 +157,16 @@ extern traceUnion traceEntry;
 
 extern uint32_t lastCrossMs;           // Timestamp at last zero crossing (ms) (set in samplePower)
 extern uint32_t nextCrossMs;           // Time just before next zero crossing (ms) (computed in Loop)
-extern uint32_t nextChannel;           // Next channel to sample (maintained in Loop)
 
 enum priorities: byte {priorityLow=3, priorityMed=2, priorityHigh=1};
 
 struct serviceBlock {                  // Scheduler/Dispatcher list item (see comments in Loop)
   serviceBlock* next;                  // Next serviceBlock in list
   uint32_t callTime;                   // Time (in NTP seconds) to dispatch
-  priorities priority;                 // All things equal tie breaker
   uint32_t (*service)(serviceBlock*);  // the SERVICE
-  serviceBlock(){next=NULL; callTime=0; priority=priorityMed; service=NULL;}
+  priorities priority;                 // All things equal tie breaker
+  uint8_t   taskID;
+  serviceBlock(){next=NULL; callTime=0; priority=priorityMed; service=NULL; taskID=0;}
 };
 
 extern serviceBlock* serviceQueue;     // Head of ordered list of services
@@ -192,6 +195,8 @@ extern float   frequency;                             // Split the difference to
 extern float   samplesPerCycle;                       // Here as well
 extern float   cycleSampleRate;
 extern int16_t cycleSamples;
+extern float   heapMs;
+extern uint32_t heapMsPeriod;
 extern IotaLogRecord statRecord;
 
       // ****************************** list of output channels **********************
@@ -201,7 +206,6 @@ extern ScriptSet* outputs;
       // ****************************** SDWebServer stuff ****************************
 
 #define DBG_OUTPUT_PORT Serial
-extern String   host;
 extern bool     hasSD;
 extern File     uploadFile;
 extern SHA256*  uploadSHA;  
@@ -211,6 +215,11 @@ extern uint8_t  configSHA256[32];         // Hash of config file
 
 extern int16_t  HTTPrequestMax;           // Maximum concurrent HTTP requests
 extern int16_t  HTTPrequestFree;          // Request semaphore
+
+extern uint8_t*   adminH1;                // H1 digest md5("admin":"admin":password) 
+extern uint8_t*   userH1;                 // H1 digest md5("user":"user":password) 
+extern authSession* authSessions;         // authSessions list head; 
+extern uint16_t   authTimeout;            // Timeout interval of authSession in seconds;   
 
       // ****************************** Timing and time data *************************
 #define  SEVENTY_YEAR_SECONDS 2208988800UL
@@ -235,6 +244,8 @@ extern const char*    updateURL;
 extern const char*    updatePath;
 extern char*          updateClass;            // NONE, MAJOR, MINOR, BETA, ALPHA, TEST
 extern const uint8_t  publicKey[32];
+extern const char     hexcodes_P[];
+extern const char     base64codes_P[];  
 
       // ************************ ADC sample pairs ************************************
 
@@ -246,10 +257,10 @@ extern int16_t Isample [MAX_SAMPLES];
       // ************************ Declare global functions
 void      setup();
 void      loop();
-void      trace(const uint8_t module, const uint8_t id); 
+void      trace(const uint8_t module, const uint8_t id, const uint8_t det=0); 
 void      logTrace(void);
 
-void      NewService(uint32_t (*serviceFunction)(struct serviceBlock*));
+void      NewService(uint32_t (*serviceFunction)(struct serviceBlock*), const uint8_t taskID=0);
 void      AddService(struct serviceBlock*);
 uint32_t  dataLog(struct serviceBlock*);
 uint32_t  historyLog(struct serviceBlock*);
@@ -260,7 +271,7 @@ uint32_t  pvoutputService(struct serviceBlock*);
 uint32_t  timeSync(struct serviceBlock*);
 uint32_t  updater(struct serviceBlock*);
 uint32_t  WiFiService(struct serviceBlock*);
-uint32_t  getFeedData(struct serviceBlock*);
+uint32_t  getFeedData(); //(struct serviceBlock*);
 
 uint32_t  logReadKey(IotaLogRecord* callerRecord);
 
@@ -280,6 +291,8 @@ String    timeString(int value);
 
 boolean   getConfig(void);
 
-void      sendChunk(char* bufr, uint32_t bufrPos);
+size_t    sendChunk(char* buf, size_t bufPos);
+
+void getSamples();
 
 #endif

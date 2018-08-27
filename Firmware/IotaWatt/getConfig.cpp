@@ -41,14 +41,10 @@ boolean getConfig(void){
   
   //************************************** Process misc first level stuff **************************
   
-  if(Config.containsKey("update")){
-    delete[] updateClass;
-    updateClass = charstar(Config["update"].as<char*>());
-  }
+  delete[] updateClass;
+  updateClass = charstar(Config["update"] | "NONE");
 
-  if(Config.containsKey("timezone")){
-    localTimeDiff = Config["timezone"].as<signed int>(); 
-  }
+  localTimeDiff = Config["timezone"].as<signed int>() | 0;; 
 
   if(Config.containsKey("logdays")){ 
     log("Current log overide days: %d", currLog.setDays(Config["logdays"].as<int>()));
@@ -63,16 +59,15 @@ boolean getConfig(void){
     configDevice(deviceStr);
     delete[] deviceStr;
   }   
-
         //************************************ Configure input channels ***************************
+
   trace(T_CONFIG,6);
   JsonArray& inputsArray = Config["inputs"]     ;
   if(inputsArray.success()){
     char* inputsStr = JsonDetail(ConfigFile, inputsArray);
     configInputs(inputsStr);
     delete[] inputsStr;
-  }   
-     
+  }  
         // ************************************ configure output channels *************************
   trace(T_CONFIG,7);
   delete outputs;
@@ -82,7 +77,6 @@ boolean getConfig(void){
     configOutputs(outputsStr);
     delete[] outputsStr;
   }   
-        
          // ************************************** configure Emoncms **********************************
 
   trace(T_CONFIG,8);
@@ -97,7 +91,6 @@ boolean getConfig(void){
   else {
     EmonStop = true;
   }
-  
         // ************************************** configure influxDB **********************************
   trace(T_CONFIG,8);
   JsonArray& influxArray = Config["influxdb"];
@@ -135,9 +128,9 @@ bool configDevice(const char* JsonStr){
   if( ! device.success()){
     log("device: Json parse failed");
   }
+  delete[] deviceName;
   if(device.containsKey("name")){
     deviceName = charstar(device["name"].as<char*>());
-    host = deviceName;
   }
   else {
     deviceName = charstar(F("IotaWatt"));
@@ -254,13 +247,12 @@ bool configInputs(const char* JsonStr){
       }
       if(type == "VT") {
         inputChannel[i]->_type = channelTypeVoltage;
+        inputChannel[i]->_vchannel = i;
       }
       else if (type == "CT"){
         inputChannel[i]->_type = channelTypePower;
-        inputChannel[i]->_vchannel = input["vchan"].as<int>();     
-        if(input.containsKey("signed")){
-          inputChannel[i]->_signed = true;
-        }
+        inputChannel[i]->_vchannel = input["vchan"].as<int>();
+        inputChannel[i]->_signed = input["signed"] | false;
       }  
       else{
         log("unsupported input type: %s", type.c_str());

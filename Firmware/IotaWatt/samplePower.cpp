@@ -7,12 +7,20 @@
 void samplePower(int channel, int overSample){
   static uint32_t trapTime = 0;
   uint32_t timeNow = millis();
+
+  trace(T_POWER,0,channel);
+  if( ! inputChannel[channel]->isActive()){
+    return;
+  }
   
       // If it's a voltage channel, use voltage only sample, update and return.
 
   trace(T_POWER,0);
   if(inputChannel[channel]->_type == channelTypeVoltage){
-    inputChannel[channel]->setVoltage(sampleVoltage(channel, inputChannel[channel]->_calibration));                                                                        
+    float VRMS = sampleVoltage(channel, inputChannel[channel]->_calibration);
+    if(VRMS >= 0.0){
+      inputChannel[channel]->setVoltage(VRMS);                                                                        
+    }
     return;
   }
 
@@ -131,8 +139,8 @@ void samplePower(int channel, int overSample){
         // If watts is negative and the channel is not explicitely signed, reverse it (backward CT).
         // If we do reverse it, and it's significant, mark it as such for reporting in the status API.
 
+  Ichannel->_reversed = false;
   if( ! Ichannel->_signed){
-    Ichannel->_reversed = false;
     if(_watts < 0){
       _watts = -_watts;
       if(_watts > 5){
@@ -403,9 +411,13 @@ int readADC(uint8_t channel){
 float sampleVoltage(uint8_t Vchan, float Vcal){
   IotaInputChannel* Vchannel = inputChannel[Vchan];
   uint32_t sumVsq = 0;
+  int retries = 0;
   while(int rtc = sampleCycle(Vchannel, Vchannel, 1, 0)){
     if(rtc == 2){
       return 0.0;
+    }
+    if(retries ++ > 3){
+      return -1.0;
     }
   }
   for(int i=0; i<samples; i++){  

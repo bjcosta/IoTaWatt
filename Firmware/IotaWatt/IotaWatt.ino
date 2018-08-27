@@ -76,6 +76,13 @@
  *   03/30/18 02_03_04 Punchlist, fix memory loak in getConfig, build server payload at bulk maturation
  *   04/15/18 02_03_05 Rework influxDB support with variables and double buffering 
  *   05/16/18 02_03_06 Reimpliment messagelog, upgrade to 2.4.1 core and lwip 2
+ *   06/03/18 02_03_07 Add web server authorization, temp time-wait fix
+ *   06/20/18 02_03_08 Use lwip 2 "high bandwidth", misc fixes   
+ *   07/11/18 02_03_09 Lastest asyngHTTPrequest, Issue#166, improve auth&trace  
+ *   07/25/18 02_03_10 run getFeedData in handler, auth session changes, use staging core 
+ *   07/31/18 02_03_11 Minor changes for general release 
+ *   08/08/18 02_03_12 Finally fix memory leak?
+ *   08/11/18 02_03_13 Back to 2.4.1 core, overhaul timeservice, fix zero voltage, add RSSI for WiFi                                 
  * 
  *****************************************************************************************************/
 
@@ -118,7 +125,6 @@ traceUnion traceEntry;
        
 uint32_t lastCrossMs = 0;             // Timestamp at last zero crossing (ms) (set in samplePower)
 uint32_t nextCrossMs = 0;             // Time just before next zero crossing (ms) (computed in Loop)
-uint32_t nextChannel = 0;             // Next channel to sample (maintained in Loop)
 
       // Various queues and lists of resources.
 
@@ -140,19 +146,26 @@ float   frequency = 55;                  // Split the difference to start
 float   samplesPerCycle = 550;           // Here as well
 float   cycleSampleRate = 0;
 int16_t cycleSamples = 0;
+float    heapMs = 0;                      // heap size * milliseconds for weighted average heap
+uint32_t heapMsPeriod = 0;                // total ms measured above.
 IotaLogRecord statRecord;                 // Maintained by statService with real-time values
 
       // ****************************** SDWebServer stuff ****************************
 
 #define DBG_OUTPUT_PORT Serial
 ESP8266WebServer server(80);
-String  host = "IotaWatt";
 bool    hasSD = false;
 File    uploadFile;
 SHA256* uploadSHA;
 boolean serverAvailable = true;   // Set false when asynchronous handler active to avoid new requests
 boolean wifiConnected = false;
 uint8_t configSHA256[32];         // Hash of config file last time read or written
+
+uint8_t*          adminH1 = nullptr;      // H1 digest md5("admin":"admin":password) 
+uint8_t*          userH1 = nullptr;       // H1 digest md5("user":"user":password)
+authSession*      authSessions = nullptr; // authSessions list head;
+uint16_t          authTimeout = 600;      // Timeout interval of authSession in seconds;   
+ 
 
       // ************************** HTTP concurrent request semaphore *************************
 
@@ -188,6 +201,9 @@ const uint8_t publicKey[32] PROGMEM = {
                         0xef, 0x9f, 0x36, 0x61, 0xa6, 0x4f, 0x35, 0x96,
                         0xe7, 0x19, 0x7b, 0xda, 0xd9, 0x78, 0xe2, 0x1b
                         };
+
+const char hexcodes_P[] PROGMEM = "0123456789abcdef";
+const char base64codes_P[] PROGMEM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";  
 
       // ************************ ADC sample pairs ************************************
  

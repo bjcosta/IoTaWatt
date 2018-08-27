@@ -8,11 +8,15 @@ bool   unpackUpdate(String updateVersion);
  * 
  *************************************************************************************************/
 uint32_t updater(struct serviceBlock* _serviceBlock) {
-  enum states {initialize, getVersion, waitVersion, download, waitDownload, install};
+  enum states {initialize, checkAutoUpdate, getVersion, waitVersion, createFile, download, waitDownload, install};
   static states state = initialize;
-  static asyncHTTPrequest* request;
+  static asyncHTTPrequest* request = nullptr;
   static String updateVersion;
   static File releaseFile;
+  static bool upToDate = false;
+  static int checkResponse = 0;
+  static char* _updateClass = nullptr;
+  static uint32_t lastVersionCheck = 0;
 
   if( ! WiFi.isConnected()){
     return UNIXtime() + 1;
@@ -21,23 +25,38 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
   switch(state){
 
     case initialize: {
-      log("Updater: started.");
-      state = getVersion;
+      log("Updater: service started. Auto-update class is %s", updateClass);
+      _updateClass = charstar(updateClass);
+      state = checkAutoUpdate;
       return 1;
     }
 
+    case checkAutoUpdate: {
+      if(strcmp(updateClass, _updateClass) != 0){
+        delete[] _updateClass;
+        _updateClass = charstar(updateClass);
+        log("Updater: Auto-update class changed to %s", _updateClass);
+        lastVersionCheck = 0;
+        upToDate = false;
+        state = getVersion;
+        return 1;
+      }
+      else if (strcmp(_updateClass, "NONE") != 0 && UNIXtime() - lastVersionCheck > updaterServiceInterval){
+        lastVersionCheck = UNIXtime();
+        state = getVersion;
+        return 1;
+      }
+      return UNIXtime() + 7;
+    }
+
     case getVersion: {
-      if( ! updateClass) {
-        break;
-      }
-      if( ! WiFi.isConnected()){
-        return UNIXtime() + 1;
-      }
-      if( ! HTTPrequestFree){
+      if( ! WiFi.isConnected() || ! HTTPrequestFree){
         return UNIXtime() + 1;
       }
       HTTPrequestFree--;
-      request = new asyncHTTPrequest;
+      if( ! request){
+        request = new asyncHTTPrequest;
+      }
       request->setDebug(false);
       String URL = String(updateURL) + updatePath;
       if( ! request->open("GET", URL.c_str())){
@@ -57,7 +76,6 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
       }
       state = waitVersion;
       return 1;
-      
     }
 
     case waitVersion: {
@@ -67,29 +85,43 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
       }
       HTTPrequestFree++;
       if(request->responseHTTPcode() != 200 || request->available() != 8){
-        log("checkUpdate: Invalid response from server.");
+        int responseCode = request->responseHTTPcode();
         delete request;
+        request = nullptr;
+        if( responseCode != checkResponse){
+          log("Updater: Invalid response from server. HTTPcode: %d", responseCode);
+        }
+        checkResponse = responseCode;
         state = getVersion;
-        break;
+        state = checkAutoUpdate;
+        if(responseCode == 403){
+          lastVersionCheck = UNIXtime();
+        }
+        return UNIXtime() + 11 ;
       }
+      checkResponse = 0;
       updateVersion = request->responseText();
       delete request;
+      request = nullptr;
       if(strcmp(updateVersion.c_str(), IOTAWATT_VERSION) == 0){
-        state = getVersion;
-        log("Updater nothing to do version is already up to date");
-        return UNIXtime() + updaterServiceInterval;
+        if( ! upToDate){
+          log("Updater: Auto-update is current for class %s.", updateClass);
+          upToDate = true;
+        }
+        state = checkAutoUpdate;
+        return 1;
       }
       log("Updater: Update from %s to %s", IOTAWATT_VERSION, updateVersion.c_str());
-      state = download;
+      state = createFile;
       return 1;
     }
 
-    case download: {
+    case createFile: {
       log("Updater: download %s", updateVersion.c_str());
       deleteRecursive("download");
       if( ! SD.mkdir("download")){
         log("Cannot create download directory");
-        state = getVersion;
+        state = checkAutoUpdate;
         break;
       }
       String filePath = "download/" + updateVersion + ".bin";
@@ -97,40 +129,43 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
       if(! releaseFile){
         log("Updater: Cannot create download file.");
         deleteRecursive("download");
-        state = getVersion;
+        state = checkAutoUpdate;
         break;
       }
-      if( ! WiFi.isConnected()){
-        return UNIXtime() + 1;
-      }
-
-        // for download, hog all requests.
-
-      if(HTTPrequestFree != HTTPrequestMax){
+      state = download;
+      return 1;
+    }
+      
+    case download: {  
+      if( ! WiFi.isConnected() || HTTPrequestFree != HTTPrequestMax){
         return UNIXtime() + 1;
       }
       HTTPrequestFree = 0;
-      request = new asyncHTTPrequest;
+      if( ! request){
+        request = new asyncHTTPrequest;
+      }
       String URL = String(updateURL) + "/firmware/bin/" + updateVersion + ".bin";
       request->setDebug(false);
       request->open("GET", URL.c_str());
       request->setTimeout(5);
       request->onData([](void* arg, asyncHTTPrequest* request, size_t available){
-        uint8_t *buf = new uint8_t[512];
+        uint8_t *buf = new uint8_t[500];
         while(request->available()){
-          size_t read = request->responseRead(buf, 512);
+          size_t read = request->responseRead(buf, 500);
           releaseFile.write(buf, read);
         }
         delete[] buf;
         });
       request->send();
-      state = waitDownload;
-      return UNIXtime() + 1;
-    }
 
-    case waitDownload: {
-      if(request->readyState() != 4){
-        return 1;
+          // Writing to the SD in async handler can cause problems. If we return
+          // and keep sampling, the onData handler could interupt another service
+          // in the middle of SDcard work.  So we will go synchronous here and wait
+          // for the entire update blob to be transfered and written to SD.
+          // Takes about 5-10 seconds.
+
+      while(request->readyState() != 4){
+        yield();
       }
       HTTPrequestFree = HTTPrequestMax;
       size_t fileSize = releaseFile.size();
@@ -138,14 +173,15 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
       if(request->responseHTTPcode() != 200){
         log("Updater: Download failed HTTPcode %s", request->responseHTTPcode());
         delete request;
+        request = nullptr;
         deleteRecursive("download");
         state = getVersion;
         break;
       }
       log("Updater: Release downloaded %dms, size %d", request->elapsedTime(), fileSize);
       delete request;
+      request = nullptr;
       state = install;
-      
       return 1;
     }
 
@@ -157,11 +193,10 @@ uint32_t updater(struct serviceBlock* _serviceBlock) {
           ESP.restart();
         }
       }
-      state = getVersion;
+      state = checkAutoUpdate;
     }
   }
-
-  return UNIXtime() + updaterServiceInterval;
+  return UNIXtime() + 1;
 }
 
 /**************************************************************************************************

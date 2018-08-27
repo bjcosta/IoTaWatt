@@ -14,15 +14,19 @@ void loop()
   setLedState();
 
   // ------- If AC zero crossing approaching, go sample a channel.
-
+  static int lastChannel = 0;
   if((uint32_t)(millis() - lastCrossMs) >= (430 / int(frequency))){
+    trace(T_LOOP,1,lastChannel);
+    int nextChannel = (lastChannel + 1) % maxInputs;
+    while( (! inputChannel[nextChannel]->isActive()) && nextChannel != lastChannel){
+      nextChannel = ++nextChannel % maxInputs;
+    }
     ESP.wdtFeed();
-    trace(T_LOOP,1);
+    trace(T_LOOP,2,nextChannel);
     samplePower(nextChannel, 0);
     trace(T_LOOP,2);
     nextCrossMs = lastCrossMs + 490 / int(frequency);
-    while( ! inputChannel[++nextChannel % maxInputs]->isActive());
-    nextChannel = nextChannel % maxInputs;
+    lastChannel = nextChannel;
   }
 
   // --------- Give web server a shout out.
@@ -46,7 +50,7 @@ void loop()
     serviceBlock* thisBlock = serviceQueue;
     serviceQueue = thisBlock->next;
     ESP.wdtFeed();
-    trace(T_LOOP,5);
+    trace(T_LOOP,5,thisBlock->taskID);
     thisBlock->callTime = thisBlock->service(thisBlock);
     yield();
     trace(T_LOOP,6);
@@ -96,9 +100,10 @@ void loop()
  * polls for activity.
  ********************************************************************************************************/
 
-void NewService(uint32_t (*serviceFunction)(struct serviceBlock*)){
+void NewService(uint32_t (*serviceFunction)(struct serviceBlock*), const uint8_t taskID){
     serviceBlock* newBlock = new serviceBlock;
     newBlock->service = serviceFunction;
+    newBlock->taskID = taskID;
     AddService (newBlock);
   }
 
@@ -131,14 +136,15 @@ void AddService(struct serviceBlock* newBlock){
  *  to just drop breadcrumbs at key places so that in the event of an exception or wdt restart, we
  *  can at least get some idea where it happened.
  *  
- *  invoking trace() puts a 16 bit entry with highbyte=module and lowbyte=seq into the 
- *  RTC_USER_MEM area.  After a restart, the 32 most recent entries are logged, oldest to most rent, 
+ *  invoking trace() puts a 32 bit entry into the RTC_USER_MEM area.  
+ *  After a restart, the 32 most recent entries are logged, oldest to most rent, 
  *  using logTrace.
  *************************************************************************************************/
-void trace(const uint8_t module, const uint8_t id){
+void trace(const uint8_t module, const uint8_t id, const uint8_t det){
   traceEntry.seq++;
   traceEntry.mod = module;
   traceEntry.id = id;
+  traceEntry.det = det;
   WRITE_PERI_REG(RTC_USER_MEM + 96 + (traceEntry.seq & 0x1F), (uint32_t) traceEntry.traceWord);
 }
 
@@ -152,7 +158,12 @@ void logTrace(void){
   String line = "";
   for(int j=0; j<32; j++){
     traceEntry.traceWord = READ_PERI_REG(RTC_USER_MEM + 96 + ((j+i)%32));
-    line += ' ' + String(traceEntry.mod) + ':' + String(traceEntry.id) + ',';
+    line += ' ' + String(traceEntry.mod) + ':' + String(traceEntry.id);
+    if(traceEntry.det == 0){
+      line += ',';
+    } else {
+      line += "[" + String(traceEntry.det) + "],"; 
+    }
   }
   line.remove(line.length()-1);  
   log("Trace: %s", line.c_str());
