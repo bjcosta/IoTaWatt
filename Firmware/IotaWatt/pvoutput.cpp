@@ -135,7 +135,7 @@ private:
   void WriteEntryString(const String& entry_str);
   bool CollectNextDataPoint();
   void IncrementTimeInterval(size_t incrementPeriods=1, const char* entryDebug="");
-  bool CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& dayStartRecord) const;
+  bool CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& dayStartRecord);
   static String GenerateEntryString(Entry entry);
 
   State state = State::STOPPED;
@@ -144,7 +144,9 @@ private:
   uint32_t unixNextPost = 0;
 
   // Current request buffer
-  xbuf reqData;
+  // We were using xbuf here, but the call to send() destroyed the data in the buffer so it couldn't be used for resend
+  // I saw no reason to use xbuf here instead of String so have moved to String
+  String reqData;
 
   // Number of measurement intervals in current reqData
   size_t reqEntries = 0;
@@ -158,6 +160,8 @@ private:
   // The PVOutput config data
   Config config;
 
+  bool mainsChannelReversed = false;
+  bool solarChannelReversed = false;
 };
 static PVOutput pvoutput;
 //=============================================================================
@@ -233,6 +237,7 @@ bool PVOutput::UpdateConfig(const char* jsonText)
     log("pvoutput: PVOutput config revision (%d) is unchanged from running config", revision);
     return true;
   }
+
 
   if (!configJson.is<int>("systemId")
     || !configJson.is<int>("mainsChannel")
@@ -351,7 +356,7 @@ void PVOutput::Stop()
   request = nullptr;
 
   // Flush apparently means same as clear() on STL containers not flush() of STL files.
-  reqData.flush();
+  reqData = "";
  
   unixDayStart  = 0;
   unixPrevPost = 0;
@@ -668,19 +673,19 @@ uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
   request->setReqHeader("X-Pvoutput-Apikey", config.apiKey); 
   request->setReqHeader("X-Pvoutput-SystemId", String(config.systemId).c_str()); 
   trace(T_pvoutput,22);
-  reqData.flush();
+  reqData = "";
   if(request->debug())
   {
     Serial.println(ESP.getFreeHeap()); 
     DateTime now = DateTime(UNIXtime() + (localTimeDiff * 3600));
     String msg = timeString(now.hour()) + ':' + timeString(now.minute()) + ':' + timeString(now.second());
     Serial.println(msg);
-    Serial.println(reqData.peekString(reqData.available()));
+    Serial.println(reqData);
   }
 
   // Send the request
   log("curl -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/getstatus.jsp\"", "<private>", config.systemId);
-  if (!request->send(&reqData, reqData.available()))
+  if (!request->send((uint8_t*)reqData.c_str(), reqData.length()))
   {
     // Try again in a little while
     trace(T_pvoutput,23);
@@ -806,9 +811,9 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
     dateString(currLog.lastKey()).c_str()
     );
 
-  assert(reqData.available() == 0);
+  assert(reqData.length() == 0);
   assert(reqEntries == 0);
-  reqData.write(PVOUTPUT_POST_DATA_PREFIX);
+  reqData += PVOUTPUT_POST_DATA_PREFIX;
   SetState(State::COLLATE_DATA);
   return unixNextPost + 1;
 }
@@ -982,7 +987,7 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
 }
 
 //=============================================================================
-bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& dayStartRecord) const
+bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord, const IotaLogRecord& nextPostRecord, const IotaLogRecord& dayStartRecord)
 {
   // Entry is for unixNextTime and reports data from the last config.reportInterval time
   entry->unixTime = unixNextPost;
@@ -1007,37 +1012,39 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
     voltageChannel = inputChannel[config.solarChannel]->_vchannel;
   }
 
+  double logHours = 0;
+  if (nextPostRecord.logHours != prevPostRecord.logHours)
+  {
+    logHours = nextPostRecord.logHours - prevPostRecord.logHours;
+  }
+
   entry->voltage = 0;
-  if(voltageChannel >= 0 && nextPostRecord.logHours != prevPostRecord.logHours) 
+  if (voltageChannel >= 0 && nextPostRecord.logHours != prevPostRecord.logHours)
   {
     trace(T_pvoutput,43);
     entry->voltage = (nextPostRecord.accum1[voltageChannel] - prevPostRecord.accum1[voltageChannel]);
-    entry->voltage /= (nextPostRecord.logHours - prevPostRecord.logHours);
+    entry->voltage /= logHours;
   }
+
 
   // Energy is calculated since begining of the day
   //
   // Generated energy is always a negative value in our calculations.
   // I.e. I assume most power channels in existing iotawatt indicate
-  // power usage of that channel and are positive. In fact many have
-  // enabled ability to force them positive.
+  // power USAGE of that channel and are positive. In fact many have
+  // enabled ability to force them positive in the config.
   //
-  // By using a negative value to indicate export/generation we have
-  // a more consitent view of things
+  // By using a negative value to indicate power generated/exported we have
+  // a consitent view of things
   //
   // Because a solar channel always generates and never uses power, we
   // will enforce it has a negative value in the case the CT has been
-  // installed in reverse. This will not be considered a failure in
-  // the configuration we will just cope with it.
+  // installed in reverse. 
   entry->energyGenerated = 0;
   if(config.solarChannel >= 0) 
   {
     trace(T_pvoutput,44);
     entry->energyGenerated = nextPostRecord.accum1[config.solarChannel] - dayStartRecord.accum1[config.solarChannel];
-    if(entry->energyGenerated > 0)
-    {
-      entry->energyGenerated *= -1;
-    }
   }
 
   // Find out how much energy we imported from the main line
@@ -1048,23 +1055,12 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
     energyImported = nextPostRecord.accum1[config.mainsChannel] - dayStartRecord.accum1[config.mainsChannel];
   }
 
-  // Example:
-  // generated = -5kWh
-  // imported = 2kWh
-  // thus we are consuming 7kWh as we are using all the 5kW and an additional 2kW from mains import
-  entry->energyConsumed = energyImported - entry->energyGenerated;
-
   // the mean power used in W since the last post
   entry->powerGenerated = 0;
   if (config.solarChannel >= 0 && nextPostRecord.logHours != prevPostRecord.logHours) 
   {
     trace(T_pvoutput,46);
     entry->powerGenerated = nextPostRecord.accum1[config.solarChannel] - prevPostRecord.accum1[config.solarChannel];
-    if(entry->powerGenerated > 0)
-    {
-      trace(T_pvoutput,47);
-      entry->powerGenerated *= -1;
-    }
     entry->powerGenerated = entry->powerGenerated / (nextPostRecord.logHours - prevPostRecord.logHours);
   }
 
@@ -1077,21 +1073,66 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
     powerImported = powerImported / (nextPostRecord.logHours - prevPostRecord.logHours);
   }
 
-  // Example:
-  // generated = -5kWh
-  // imported = 2kWh
-  // thus we are consuming 7kWh as we are using all the 5kW and an additional 2kW from mains import
-  entry->powerConsumed = powerImported - entry->powerGenerated;
+  if (solarChannelReversed)
+  {
+    entry->energyGenerated *= -1;
+    entry->powerGenerated *= -1;
+  }
+
+  // How many watts we permit it to report when actual power drain is 0
+  // There appears to be about 0.6W of usage when no CT is plugged in
+  const double PERMITTED_POWER_ZERO_ERROR = 1.0;
+
+  if(entry->powerGenerated > PERMITTED_POWER_ZERO_ERROR)
+  {
+    log("pvoutput: At time: %s config appears incorrect or CT on solar is backwards. Power usage of solar channel is expected to be negative but is: %lfW", dateString(entry->unixTime).c_str(), entry->powerGenerated);
+    entry->energyGenerated *= -1;
+    entry->powerGenerated *= -1;
+    solarChannelReversed = !solarChannelReversed;
+  }
+
+  if(entry->energyGenerated > logHours * PERMITTED_POWER_ZERO_ERROR)
+  {
+    log("pvoutput: Warning at time: %s even after reversal solar energy usage (%lf) is not negative. Something is wrong as power usage and energy usage have different signs for solar", dateString(entry->unixTime).c_str(), entry->energyGenerated);
+    trace(T_pvoutput,47);
+  }
+
+  if (mainsChannelReversed)
+  {
+    energyImported *= -1;
+    powerImported *= -1;
+  }
 
   // If we are exporting more than we are generating something is wrong
-  if (powerImported < entry->powerGenerated) 
+  if ((powerImported + PERMITTED_POWER_ZERO_ERROR) < (entry->powerGenerated - PERMITTED_POWER_ZERO_ERROR))
   {
     trace(T_pvoutput,49);
     //log(
     //  "pvoutput: PVOutput configuration is incorrect. Appears we are exporting more power than we are generating. Between " + String(nextPostRecord->UNIXtime) + " and " + String(prevPostRecord->UNIXtime) 
     //  + " we imported: " + String(powerImported) + "Wh and generated: " + String(powerGenerated) + "Wh");
-    log("pvoutput: Config appears incorrect");
+    log("pvoutput: At time: %s config appears incorrect or CT on mains import/export is backwards. Power imported: %lfW is less than solar power used: %lf swapping sign of power imported. We are pushing more power to the grid than we are generating via solar", dateString(entry->unixTime).c_str(), powerImported, entry->powerGenerated);
+    energyImported *= -1;
+    powerImported *= -1;
+    mainsChannelReversed = !mainsChannelReversed;
   }
+
+  if ((energyImported + (logHours * PERMITTED_POWER_ZERO_ERROR) < entry->energyGenerated - (logHours * PERMITTED_POWER_ZERO_ERROR)))
+  {
+    log("pvoutput: Warning at time: %s even after reversal mains energy usage (%lf) is not less than solar energy generation (%lf)", dateString(entry->unixTime).c_str(), energyImported, entry->energyGenerated);
+    trace(T_pvoutput,47);
+  }
+
+  // Example:
+  // generated = -5kWh
+  // imported = 2kWh
+  // thus we are consuming 7kWh as we are using all the 5kWh and an additional 2kWh from mains import
+  entry->energyConsumed = energyImported - entry->energyGenerated;
+
+  // Example:
+  // generated = -5kW
+  // imported = 2kW
+  // thus we are consuming 7kW as we are using all the 5kW and an additional 2kW from mains import
+  entry->powerConsumed = powerImported - entry->powerGenerated;
 
   return true;
 }
@@ -1323,12 +1364,12 @@ size_t PVOutput::CalculateMissingPeriodsToSkip(IotaLogRecord& prevPostRecord, Io
 //=============================================================================
 void PVOutput::WriteEntryString(const String& entry_str)
 {
-  if (reqData.available() > strlen(PVOUTPUT_POST_DATA_PREFIX))
+  if (reqData.length() > strlen(PVOUTPUT_POST_DATA_PREFIX))
   {
     // If already one item in the reqData, then separate this one with a ;
-    reqData.write(';');
+    reqData += ";";
   }
-  reqData.write(entry_str);
+  reqData += entry_str;
   ++reqEntries;
   //log("Add entry: %s", entry_str.c_str());
 }
@@ -1422,7 +1463,7 @@ uint32_t PVOutput::TickCollateData(struct serviceBlock* serviceBlock)
 {
   // @todo Not sure why this is required. Feel it should be removed, as if req has outstanding data it should have been handled and cleared already
   assert(request == nullptr);
-  if (request != nullptr && request->readyState() < 4 && reqData.available() >= config.reqDataLimit)
+  if (request != nullptr && request->readyState() < 4 && reqData.length() >= config.reqDataLimit)
   {
     log("An outstanding request is incomplete try again soon");
     return 1; 
@@ -1431,7 +1472,7 @@ uint32_t PVOutput::TickCollateData(struct serviceBlock* serviceBlock)
   // @todo Other services handle STOP bool here so the stop happens in the state machine tick defined location. May still require that if we see issues with syncrhonous stop we implemented
 
   // If buffer isn't full, add another measurement.
-  if (reqData.available() < config.reqDataLimit && unixNextPost <= currLog.lastKey())
+  if (reqData.length() < config.reqDataLimit && unixNextPost <= currLog.lastKey())
   {
     CollectNextDataPoint();
   }
@@ -1449,7 +1490,7 @@ uint32_t PVOutput::TickCollateData(struct serviceBlock* serviceBlock)
 
   // Is the data ready to be posted to PVOutput
   bool isRequestAvailable = ((request == nullptr || request->readyState() == 4) && HTTPrequestFree);
-  bool isRequestBufferFull = reqEntries >= MAX_BULK_SEND || reqData.available() >= config.reqDataLimit;
+  bool isRequestBufferFull = reqEntries >= MAX_BULK_SEND || reqData.length() >= config.reqDataLimit;
   if (isRequestAvailable && (realtimePost || isRequestBufferFull))
   {
     trace(T_pvoutput,76);
@@ -1516,13 +1557,13 @@ uint32_t PVOutput::TickPostData(struct serviceBlock* serviceBlock)
     DateTime now = DateTime(UNIXtime() + (localTimeDiff * 3600));
     String msg = timeString(now.hour()) + ':' + timeString(now.minute()) + ':' + timeString(now.second());
     Serial.println(msg);
-    Serial.println(reqData.peekString(reqData.available()));
+    Serial.println(reqData);
   }
 
   trace(T_pvoutput,81);
   // @todo check bool error
-  log("curl -d \"%s\" -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/addbatchstatus.jsp\"", reqData.peekString().c_str(), "<private>", config.systemId);
-  if (!request->send(&reqData, reqData.available()))
+  log("curl -d \"%s\" -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/addbatchstatus.jsp\"", reqData.c_str(), "<private>", config.systemId);
+  if (!request->send((uint8_t*)reqData.c_str(), reqData.length()))
   {
     // Try again in a little while
     trace(T_pvoutput,82);
@@ -1612,9 +1653,9 @@ uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
   // POST was successful, go back into loop reading new post data
   trace(T_pvoutput,90);
   retryCount = 0;
-  reqData.flush();
+  reqData = "";
   reqEntries = 0;
-  reqData.write(PVOUTPUT_POST_DATA_PREFIX);
+  reqData = PVOUTPUT_POST_DATA_PREFIX;
   SetState(State::COLLATE_DATA);
   return 1;
 }
