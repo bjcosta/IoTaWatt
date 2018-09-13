@@ -245,6 +245,7 @@ bool configInputs(const char* JsonStr){
         }
         entry = entry->next;
       }
+      inputChannel[i]->_reverse = input["reverse"] | false;
       if(type == "VT") {
         inputChannel[i]->_type = channelTypeVoltage;
         inputChannel[i]->_vchannel = i;
@@ -253,6 +254,7 @@ bool configInputs(const char* JsonStr){
         inputChannel[i]->_type = channelTypePower;
         inputChannel[i]->_vchannel = input["vchan"].as<int>();
         inputChannel[i]->_signed = input["signed"] | false;
+        inputChannel[i]->_double = input["double"] | false;
       }  
       else{
         log("unsupported input type: %s", type.c_str());

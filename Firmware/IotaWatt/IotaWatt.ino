@@ -82,7 +82,8 @@
  *   07/25/18 02_03_10 run getFeedData in handler, auth session changes, use staging core 
  *   07/31/18 02_03_11 Minor changes for general release 
  *   08/08/18 02_03_12 Finally fix memory leak?
- *   08/11/18 02_03_13 Back to 2.4.1 core, overhaul timeservice, fix zero voltage, add RSSI for WiFi                                 
+ *   08/11/18 02_03_13 Back to 2.4.1 core, overhaul timeservice, fix zero voltage, add RSSI for WiFi 
+ *   09/08/18 02_03_14 Add reverse and double to inputs, modify sampleCycle                                 
  * 
  *****************************************************************************************************/
 
@@ -100,9 +101,9 @@ messageLog msglog;
       // Define filename Strings of system files.          
 
 char* deviceName;             
-const char* IotaLogFile = "/IotaWatt/IotaLog";
-const char* historyLogFile = "/IotaWatt/histLog";
-const char* IotaMsgLog = "/IotaWatt/IotaMsgs.txt";
+const char* IotaLogFile = "iotawatt/iotalog";
+const char* historyLogFile = "iotawatt/histLog";
+const char* IotaMsgLog = "iotawatt/iotamsgs.txt";
 const char* ntpServerName = "pool.ntp.org";
 
                        
@@ -194,7 +195,7 @@ uint8_t  ledCount;                           // Current index into cycle
       
 const char* updateURL = "192.168.50.10:5000";
 const char* updatePath = "/firmware/iotaupdt.php";
-char*    updateClass = nullptr;              // NONE, MAJOR, MINOR, BETA, ALPHA, TEST    
+char*    updateClass;                                   // NONE, MAJOR, MINOR, BETA, ALPHA, TEST    
 const uint8_t publicKey[32] PROGMEM = {
                         0x54, 0xde, 0x71, 0xf3, 0x32, 0x86, 0x41, 0x4f,
                         0x82, 0xbc, 0xf5, 0x94, 0x6a, 0xe3, 0x7d, 0x18,

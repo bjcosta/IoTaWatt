@@ -48,7 +48,7 @@ void samplePower(int channel, int overSample){
         // Invoke high speed sample collection.
         // If it fails, return.
  
-  if(int rtc = sampleCycle(Vchannel, Ichannel, 1, 0)) {
+  if(int rtc = sampleCycle(Vchannel, Ichannel)) {
     trace(T_POWER,2);
     if(rtc == 2){
       Ichannel->setPower(0.0, 0.0);
@@ -58,8 +58,6 @@ void samplePower(int channel, int overSample){
       
   int16_t rawV;
   int16_t rawI;  
-  int32_t sumV = 0;
-  int32_t sumI = 0;
   double sumP = 0;
   double sumVsq = 0;
   double sumIsq = 0;  
@@ -88,34 +86,12 @@ void samplePower(int channel, int overSample){
     rawI = *IsamplePtr;
     rawV = Vsample[Vindex]; 
     rawV += int(stepFraction * (Vsample[Vindex + 1] - Vsample[Vindex]));
-    sumV += rawV;
     sumVsq += rawV * rawV;
-    sumI += rawI;
     sumIsq += rawI * rawI;
     sumP += rawV * rawI;      
     IsamplePtr++;
     Vindex = ++Vindex % samples;
   }
-  
-        // Adjust the offset values assuming symmetric waves but within limits otherwise.
- 
-  const uint16_t minOffset = ADC_RANGE / 2 - ADC_RANGE / 200;    // Allow +/- .5% variation
-  const uint16_t maxOffset = ADC_RANGE / 2 + ADC_RANGE / 200;
-
-  trace(T_POWER,4);
-  if(sumV >= 0) sumV += samples / 2; 
-  else sumV -= samples / 2;
-  int16_t offsetV = Vchannel->_offset + sumV / samples;
-  if(offsetV < minOffset) offsetV = minOffset;
-  if(offsetV > maxOffset) offsetV = maxOffset;
-  Vchannel->_offset = offsetV;
-  
-  if(sumI >= 0) sumI += samples / 2;
-  else sumI -= samples / 2;
-  int16_t offsetI = Ichannel->_offset + sumI / samples;
-  if(offsetI < minOffset) offsetI = minOffset;
-  if(offsetI > maxOffset) offsetI = maxOffset;
-  Ichannel->_offset = offsetI;
     
         // Voltage calibration is the ratio of line voltage to voltage presented at the input.
         // Input voltage is further attenuated with voltage dividing resistors (Vadj_3).
@@ -134,6 +110,11 @@ void samplePower(int channel, int overSample){
   _Irms = Iratio * sqrt((double)(sumIsq / samples));
   _watts = Vratio * Iratio * (double)(sumP / samples);
   _VA = _Vrms * _Irms;
+
+  if(Ichannel->_double){
+    _watts *= 2.0;
+    _VA *= 2.0;
+  }
   
 
         // If watts is negative and the channel is not explicitely signed, reverse it (backward CT).
@@ -188,7 +169,7 @@ void samplePower(int channel, int overSample){
   *   
   ****************************************************************************************************/
   
-  int sampleCycle(IotaInputChannel* Vchannel, IotaInputChannel* Ichannel, int cycles, int overSamples){
+  int sampleCycle(IotaInputChannel* Vchannel, IotaInputChannel* Ichannel, int cycles){
 
   int Vchan = Vchannel->_channel;
   int Ichan = Ichannel->_channel;
@@ -227,6 +208,9 @@ void samplePower(int channel, int overSample){
   byte ADC_VselectPin = ADC_selectPin[inputChannel[Vchan]->_addr >> 3];
   uint32_t ADC_IselectMask = 1 << ADC_IselectPin;             // Mask for hardware chip select (pins 0-15)
   uint32_t ADC_VselectMask = 1 << ADC_VselectPin;
+
+  bool Vreverse = inputChannel[Vchan]->_reverse;
+  bool Ireverse = inputChannel[Ichan]->_reverse;
   
   SPI.beginTransaction(SPISettings(2000000,MSBFIRST,SPI_MODE0));
  
@@ -322,8 +306,7 @@ void samplePower(int channel, int overSample){
               // extract the rawI from the SPI hardware buffer and adjust with offset.
  
         rawI = (word(*fifoPtr8 & 0x01, *(fifoPtr8+1)) << 3) + (*(fifoPtr8+2) >> 5) - offsetI;
-   
-       
+               
         // Finish up loop cycle by checking for zero crossing.
         // Crossing is defined by voltage changing signs  (Xor) and crossGuard negative.
 
@@ -343,25 +326,65 @@ void samplePower(int channel, int overSample){
             lastCrossUs = micros();                     // To compute frequency
             lastCrossMs = millis();                     // For main loop dispatcher to estimate when next crossing is imminent
             lastCrossSamples = samples;
-            crossGuard = overSamples + 1;
           }
           else {
             midCrossSamples = samples;                               
           }
         }   
-  } while(crossCount < crossLimit || crossGuard > 0); 
+  } while(crossCount < crossLimit); 
 
   *VsamplePtr = rawV;                                       
   *IsamplePtr = (rawI + lastI) >> 1;
    
   trace(T_SAMP,8);
 
-  if(samples < ((lastCrossUs - firstCrossUs) * 381 / 10000)){
+          // Process raw samples.
+          // Add them to check the offset.
+          // Reverse if required.
+
+  VsamplePtr = Vsample;
+  IsamplePtr = Isample;
+  int32_t sumI = 0;
+  int32_t sumV = 0;
+  for(int i=0; i<samples; i++){
+    sumV += *VsamplePtr;
+    sumI += *IsamplePtr;
+    if(Vreverse) *VsamplePtr = - *VsamplePtr;
+    if(Ireverse) *IsamplePtr = - *IsamplePtr;
+    VsamplePtr++;
+    IsamplePtr++;
+  }
+
+        // Adjust the offset values assuming symmetric waves but within limits otherwise.
+ 
+  const uint16_t minOffset = ADC_RANGE / 2 - ADC_RANGE / 200;    // Allow +/- .5% variation
+  const uint16_t maxOffset = ADC_RANGE / 2 + ADC_RANGE / 200;
+
+  trace(T_SAMP,9);
+
+  if(sumV >= 0) sumV += samples / 2; 
+  else sumV -= samples / 2;
+  offsetV = Vchannel->_offset + sumV / samples;
+  if(offsetV < minOffset) offsetV = minOffset;
+  if(offsetV > maxOffset) offsetV = maxOffset;
+  Vchannel->_offset = offsetV;
+  
+  if(sumI >= 0) sumI += samples / 2;
+  else sumI -= samples / 2;
+  offsetI = Ichannel->_offset + sumI / samples;
+  if(offsetI < minOffset) offsetI = minOffset;
+  if(offsetI > maxOffset) offsetI = maxOffset;
+  Ichannel->_offset = offsetI; 
+  
+  if(samples < ((lastCrossUs - firstCrossUs) * 380 / 10000)){
     Serial.print(F("Low sample count "));
     Serial.println(samples);
     return 1;
   }
-  if(abs(samples - (midCrossSamples * 2)) > 3){
+  if(abs(samples - (midCrossSamples * 2)) > 10){
+    DateTime now = DateTime(UNIXtime() + (localTimeDiff * 3600));
+    Serial.printf_P(PSTR("%d/%02d/%02d %02d:%02d:%02d sample imbalance: %d - %d = %d\r\n"), now.month(), now.day(), now.year()%100,
+    now.hour(), now.minute(), now.second(), midCrossSamples, samples-midCrossSamples, abs(samples - (midCrossSamples * 2)));
     return 1;
   }
             // Update damped frequency.
@@ -412,7 +435,7 @@ float sampleVoltage(uint8_t Vchan, float Vcal){
   IotaInputChannel* Vchannel = inputChannel[Vchan];
   uint32_t sumVsq = 0;
   int retries = 0;
-  while(int rtc = sampleCycle(Vchannel, Vchannel, 1, 0)){
+  while(int rtc = sampleCycle(Vchannel, Vchannel)){
     if(rtc == 2){
       return 0.0;
     }
@@ -487,11 +510,11 @@ String samplePhase(uint8_t Vchan, uint8_t Ichan, uint16_t Ishift){
   double sumVsq = 0;
   double sumIsq = 0;
   double sumVI = 0;
-  float  sumSamples;
+  double sumSamples;
 
   for(int i=0; i<4; i++){
     uint32_t startTime = millis();
-    while (sampleCycle(Vchannel, Ichannel, cycles, Ishift)){
+    while (sampleCycle(Vchannel, Ichannel, cycles)){
       if(millis()-startTime > 75){
         return String("Unable to sample");
       }
@@ -504,9 +527,9 @@ String samplePhase(uint8_t Vchan, uint8_t Ichan, uint16_t Ishift){
     sumSamples += samples;
   }
 
-  double Vrms = sqrt(sumVsq / (double)samples);
-  double Irms = sqrt(sumIsq / (double)samples);
-  double VI = sumVI / (double)samples;
+  double Vrms = sqrt(sumVsq / sumSamples);
+  double Irms = sqrt(sumIsq / sumSamples);
+  double VI = sumVI / sumSamples;
   float phaseDiff = (double)57.29578 * acos(VI / (Vrms * Irms)) - 0.055;  // 0.055 is shift introduced in sampling timing
 
   String response = "Sample phase lead\r\n\r\nChannel: " + String(Ichan) + "\r\n";
@@ -519,5 +542,4 @@ String samplePhase(uint8_t Vchan, uint8_t Ichan, uint16_t Ishift){
   
   return response;
 }
-
-
+ 
