@@ -1,22 +1,32 @@
+// @todo Need to test what is returned for getstatus() on a newly created PVOutput service, we want to make sure we do something sensible. I imagine right now just stay in infinite retry loop
+
+
+// Implements an output POST service that sends power data to PVOutput using the API defined at: 
+// https://pvoutput.org/help.html#api-spec
 #include "pvoutput.h"
 #include "IotaWatt.h"
 #include <assert.h>
 
 #define ENABLE_HTTP_DEBUG false
 
-// We use c1=0 as for cumuliative posts there is a limit of 200kWh for the overall accumulation
-// This will stop working after about 10 days
+// We use c1=0 to disable cumuliative posts
+// There is a limit of 200kWh for the overall accumulation which means the data reported
+// will stop working after about 10 days so we disable cumuliative posts and do the 
+// calculations ourselves to avoid this limitation.
 //
-// We also use n=0 as we can easily calculate the values ourselves and it doesn't work
-// for energy anyway only for the power reports.
+// We use n=0 to disable to auto calculation of gross generation/consumption data from 
+// net import/export. We can easily calculate the gross generation/consumption data ourselves
+// and the n=1 option only works for energy and not power reports. This way both energy and 
+// power graphs can be consistent
 static const char* PVOUTPUT_POST_DATA_PREFIX = "c1=0&n=0&data=";
 static const uint16_t MAX_BULK_SEND = 30;
 
-// Max permitted time in the past for a POST is 14 days
-// We will set max to 13 days for now
+// Max permitted time in the past for a POST to PVOutput API is 14 days
+// We will set max to 13 days for now so we dont have to worry about the
+// race if trying to post just on 14 day boundary
 static const uint32_t MAX_PAST_POST_TIME = 13 * 24 * 60 * 60;
 
-// @todo Ask Bob to make the state enums public
+// @todo Ask Bob to make the state enums public. His code uses hard coded "4" all over the place, shouldnt just export the enum publicly?
 // Copied from asyncHTTPrequest as it is not public for some reason but states used all over the place as int literals
 enum readyStates 
 {
@@ -27,14 +37,10 @@ enum readyStates
     readyStateDone = 4              // Request complete, all data available.
 }; 
 
-
-// @todo overloaded dateString() that takes a uint32_t in utilities.cpp same format though and the utilities one could call this
+// @todo This belongs in utilities.cpp and the other overload dateString(uint32_t) should probably create a DateTime object and call this one
 static String dateString(const DateTime& dt)
 {
   char dateStr[23] = {0};
-  // @todo I prefer this format, but IotaWatt is using some other format I am copying:
-  // snprintf(dateStr, sizeof(dateStr), "%04u/%02u/%02u-%02u:%02u:%02u", dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute(), dt.second());
-
   snprintf(dateStr, sizeof(dateStr), "%u/%u/%u %u:%u:%u", dt.month(), dt.day(), dt.year()%100, dt.hour(), dt.minute(), dt.second());
   dateStr[sizeof(dateStr) - 1] = 0;
   return String(dateStr);
@@ -78,30 +84,39 @@ private:
     // Revision control for dynamic config
     int32_t   revision = -1;
 
+    // Your PVOutput API key obtained from: https://pvoutput.org/account.jsp
+    // You need to enable API Access for your account and generate a key
     const char*  apiKey = nullptr;
+
+    // Is integer ID of the system you want to report to:
+    // https://pvoutput.org/addsystem.jsp
     int          systemId = 0;
+
+    // The CT channel on which the mains net import/export is measured
     int          mainsChannel = 0;
+
+    // The CT channel on which the solar inverter is measured
     int          solarChannel = 0;
+
+    // How long to wait for HTTP response before timeout.
     uint32_t     httpTimeout = 2000;
 
-    // transaction yellow light size
+    // Batched post transaction yellow light size
     size_t       reqDataLimit = 4000;
 
+    // PVOutput supports a minimum post interval of 5 minutes
     static const uint32_t MIN_REPORT_INTERVAL = 5*60;
 
     // Interval (sec) to POST data to pvoutput
     uint32_t     reportInterval = MIN_REPORT_INTERVAL * 1;
 
-    // How many entries to permit in realtime bulk send
+    // How many entries to post in realtime bulk send (anything larger than 1 causes delay in POST)
     uint16_t     bulkSend = 1;
   };
 
   struct Entry
   {
     uint32_t unixTime;
-
-    // The above unix time as a local date time
-    DateTime dt;
 
     double voltage;
     double energyConsumed;
@@ -144,7 +159,10 @@ private:
   uint32_t unixNextPost = 0;
 
   // Current request buffer
-  // We were using xbuf here, but the call to send() destroyed the data in the buffer so it couldn't be used for resend
+  // We were using xbuf here, but the call to send() destroyed the data in the buffer 
+  // so it couldn't be used for resend and instead had to reconstruct the data 
+  // buffer all over again.
+  //
   // I saw no reason to use xbuf here instead of String so have moved to String
   String reqData;
 
@@ -160,7 +178,10 @@ private:
   // The PVOutput config data
   Config config;
 
+  // True if we think the mains import/export CT coil is backwards
   bool mainsChannelReversed = false;
+
+  // True if we think the solar inverter CT coil is backwards
   bool solarChannelReversed = false;
 };
 static PVOutput pvoutput;
@@ -277,10 +298,21 @@ bool PVOutput::UpdateConfig(const char* jsonText)
 //=============================================================================
 void PVOutput::GetStatusJson(JsonObject& json) const
 {
-  // @todo Writeme
+  // @todo Writeme return relevant state in JSON that callers may be interested in
   trace(T_pvoutput,8);
   json.set(F("running"),IsRunning());
   //json.set(F("lastpost"),influxLastPost);
+  //  State state = State::STOPPED;
+  // uint32_t unixDayStart  = 0;
+  // uint32_t unixPrevPost = 0;
+  //uint32_t unixNextPost = 0;
+  //String reqData;
+  //size_t reqEntries = 0;
+  //int16_t retryCount = 0;
+  //asyncHTTPrequest* request = nullptr;
+  //Config config;
+  //bool mainsChannelReversed = false;
+  //bool solarChannelReversed = false;
 }
 
 //=============================================================================
@@ -311,7 +343,9 @@ uint32_t PVOutput::Tick(struct serviceBlock* serviceBlock)
 void PVOutput::Start()
 {
   // Make sure to restart the service
-  // @todo This is not a nice restart, but aborts any outstanding requests. Do we want a nice async stop?
+
+  // This is not a nice stop if currently running, but aborts any outstanding requests
+  // before we re-initialize the service.
   Stop();
 
   log("pvoutput: Starting PVOutput service");
@@ -374,11 +408,14 @@ bool PVOutput::IsRunning() const
 //=============================================================================
 PVOutput::PVOutputError PVOutput::InterpretPVOutputError(int responseCode, const String& responseText)
 {
-  // Most errors we will just never recover from and keep those as unmapped errors. 
-  // If they are bugs we will need to fix them , if they are config errors then user needs to fix something
+  // Most "possible" errors we can't recover from. We will keep those as unmapped errors and if 
+  // we did something wrong in the code then hopefully we will get a bug report. What we will not do
+  // is silently drop data that can't be recovered and move on. 
+  //
+  // If they are bugs we will need to fix them, if they are config errors then user needs to fix something
   // 
-  // Only some errors like old requests will be "skipped" as we know about them and cant do 
-  // anything about it
+  // Only some known errors like old requests will be "skipped" as we know about them and cant do 
+  // anything about it.
   if (responseCode == 400)
   {
     if (strstr(responseText.c_str(), "Date is older than") != nullptr)
@@ -405,7 +442,7 @@ PVOutput::PVOutputError PVOutput::InterpretPVOutputError(int responseCode, const
   return PVOutputError::UNMAPPED_ERROR;
 
 
-  // Errors we can recover from with time: Action: Wait and try again
+  // Errors we may be able recover from with time: Action: Wait and try again
   // * Forbidden 403: Exceeded number requests per hour	
   // * Bad request 400: Date is in the future [date]	
 
@@ -553,8 +590,7 @@ bool PVOutput::ParseGetStatusResponse(const String& responseText, DateTime* dt)
   // In special case of start of day, we will see if there is any data for energy
   // If not then assume this is the start of the new day
   // If so then assume this is the end of prev day and still need to post start of new day
-  // @todo Add back in after testing 
-  //if (dt->hour() == 0 && dt->minute() == 0)
+  if (dt->hour() == 0 && dt->minute() == 0)
   {
     // Now if we can parse a non 0 or non NaN value for either energyConsumption or energyGeneration then
     // it means that we have a end of day record not a start of day record and we want
@@ -581,27 +617,27 @@ bool PVOutput::ParseGetStatusResponse(const String& responseText, DateTime* dt)
     }
 
 
-    // @todo remove this if after testing
-    if (dt->hour() == 0 && dt->minute() == 0)
+    // For the following posts we get:
+    // curl -d "c1=0&n=0&d=20180724&t=23:59&v1=1000&v2=0&v3=1200&v4=100" https://pvoutput.org/service/r2/addstatus.jsp
+    // curl "http://pvoutput.org/service/r2/getstatus.jsp"
+    // Returns: 20180725,00:00,1000,0,1200,100,NaN,NaN,NaN
+    //
+    // curl -d "c1=0&n=0&d=20180725&t=00:00&v1=0&v2=0&v3=0&v4=0" https://pvoutput.org/service/r2/addstatus.jsp
+    // curl "http://pvoutput.org/service/r2/getstatus.jsp"
+    // Returns: 20180725,00:00,0,0,0,0,NaN,NaN,NaN
+    if (containsEnergyValues)
     {
+      // We need to use the prev day 23:59:59 sentinel as this record read is a end-of-day not a start-of-day record
+      // Though PVOutput reports 00:00:00 of next day with non-zero energy values
 
-      // For the following posts we get:
-      // curl -d "c1=0&n=0&d=20180724&t=23:59&v1=1000&v2=0&v3=1200&v4=100" https://pvoutput.org/service/r2/addstatus.jsp
-      // curl "http://pvoutput.org/service/r2/getstatus.jsp"
-      // Returns: 20180725,00:00,1000,0,1200,100,NaN,NaN,NaN
-      //
-      // curl -d "c1=0&n=0&d=20180725&t=00:00&v1=0&v2=0&v3=0&v4=0" https://pvoutput.org/service/r2/addstatus.jsp
-      // curl "http://pvoutput.org/service/r2/getstatus.jsp"
-      // Returns: 20180725,00:00,0,0,0,0,NaN,NaN,NaN
-      if (containsEnergyValues)
-      {
-        // We need to use the prev day 23:59:59 sentinel as this record read is a end-of-day not a start-of-day record
-        // Though PVOutput reports 00:00:00 of next day with non-zero energy values
-
-        // Move back to the sentinel time (is just 1 sec before 00:00:00, i.e. 23:59:59)
-        uint32_t tmp = dt->unixtime() - 1;
-        *dt = DateTime(tmp);
-      }
+      // Move back to the sentinel time (is just 1 sec before 00:00:00, i.e. 23:59:59)
+      uint32_t tmp = dt->unixtime() - 1;
+      *dt = DateTime(tmp);
+      log("Parsed status date/time is a end-of-day record returning: %s", dateString(*dt).c_str());
+    }
+    else
+    {
+      log("Parsed status date/time is a start-of-day record returning: %s", dateString(*dt).c_str());
     }
   }
 
@@ -627,8 +663,8 @@ uint32_t PVOutput::TickInitialize(struct serviceBlock* serviceBlock)
 {
   if (!currLog.isOpen())
   {
-   trace(T_pvoutput,18);
-   log("Waiting for IoTaLog to be opened");
+    trace(T_pvoutput,18);
+    //log("Waiting for IoTaLog to be opened");
     return UNIXtime() + 5;
   }
 
@@ -642,8 +678,6 @@ uint32_t PVOutput::TickInitialize(struct serviceBlock* serviceBlock)
 uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
 {
   trace(T_pvoutput,20);
-
-  // @todo influx makes this configurable pvoutputBeginPosting
   unixPrevPost = 0;
 
   // Make sure wifi is connected and there is a resource available.
@@ -661,12 +695,10 @@ uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
   }
   request = new asyncHTTPrequest;
 
-  // @todo Need to test what is returned on a newly created PVOutput service, we want to make sure we do something sensible. I imagine right now just stay in infinite retry loop
-
   // API for this is documented at: https://pvoutput.org/help.html#api-getstatus
   request->setTimeout(config.httpTimeout);
   request->setDebug(ENABLE_HTTP_DEBUG);
-  // Note: asyncHTTPrequest seems require uppercase HTTP in URL
+  // Note: asyncHTTPrequest seems to require uppercase HTTP in URL
   request->open("GET", "HTTP://pvoutput.org/service/r2/getstatus.jsp");
   request->setReqHeader("Host", "pvoutput.org"); 
   request->setReqHeader("Content-Type", "application/x-www-form-urlencoded"); 
@@ -689,7 +721,7 @@ uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
   {
     // Try again in a little while
     trace(T_pvoutput,23);
-    log("Sending GET request failed");
+    log("Sending getstatus GET request failed");
     delete request;
     request = nullptr;
     return UNIXtime() + 5;
@@ -708,8 +740,7 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
 
   if(request->readyState() != 4)
   {
-    // @todo Tick right away or wait 1 sec?
-  trace(T_pvoutput,26);
+    trace(T_pvoutput,26);
     return UNIXtime() + 1;
   }
 
@@ -724,7 +755,6 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   {
     trace(T_pvoutput,28);
     log("pvoutput: last entry query failed: %d : %s", responseCode, responseText.c_str());
-    // @todo test case where no data at all in pvoutput and handle specially. Dont know what message that has yet.
     switch (InterpretPVOutputError(responseCode, responseText))
     {
     // Wait for a while and try again errors
@@ -758,8 +788,8 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   unixPrevPost = dt.unixtime()  - (localTimeDiff * 3600);
 
   // Cases we care about:
-  // * get normal : prev=get, next=get+interval, day=day of prev(or day of next after adjust) : adjust for span day boundary
-  //    Might end up with a 23:59 after adjust for span day boundary(23:59)
+  // * get normal : prev=get, next=get+interval, day=day of prev(or day of next after adjust) : adjust for day span boundary
+  //    Might end up with a 23:59 after adjust for day span boundary(23:59)
   // * get 23:59:59 day end : prev=00-interval(not accurate), next=00:00, day=day of 00:00 (0 energy)
   // * get 00:00:00 day start (same as normal): prev=00, next=00+interval, day=day of 00:00 (basically same as normal but adjust not required)
   if (dt.hour() == 23 && dt.minute() == 59 && dt.second() == 59)
@@ -821,20 +851,9 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
 //=============================================================================
 bool PVOutput::ReadSaneLogRecordOrPrev(IotaLogRecord* record, uint32_t when)
 {
-  // @todo Verify but I think that the logReadKey already gets record or prev
   record->UNIXtime = when;
+  // Note we are expecting logReadKey returns the first record <= requested key
   bool ret = logReadKey(record) != 0;
-
-  // @todo Old code was looking at currLog.firstKey(), currLog.lastKey() and other things to figure out what was going on
-  // There was also code to manually search back in time using:
-  //int rkResult = 1;
-  //do {
-  //rkResult = currLog.readKey(dayStartRecord);
-  //if(rkResult != 0) {
-  //trace(T_pvoutput, 9);
-  //dayStartRecord->UNIXtime -= 1;
-  //}
-  //} while(rkResult != 0 && dayStartRecord->UNIXtime > currLog.firstKey());
 
   // Check for NaN
   if(record->serial != record->serial)
@@ -906,6 +925,7 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
   else
   {
   	// @todo I think this can be simplified a bit
+
     // Otherwise just do a normal increment but handle crossing the day boundary
     unixNextPost += (incrementPeriods * config.reportInterval);
     //log("unixNextPost: %u, mod: %u local next: %s", (unsigned int)unixNextPost, (unsigned int)(unixNextPost % config.reportInterval), dateString(unixNextPost).c_str());
@@ -920,16 +940,18 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
       || localPrevPostDt.month() != localNextPostDt.month()
       || localPrevPostDt.day() != localNextPostDt.day())
     {
-      // Date changed, need to handle this specially by setting next to either 23:59:59 of prev day or 00:00:00 of current day 
-      // in order to post the special day end or day start entries.
+      // The date changed, we need to handle this specially by setting next to 
+      // either 23:59:59 of prev day or 00:00:00 of current day 
+      // so we can post the special day end or day start entries.
       //
-      // If just incrementing by 1 period the case of 00:00:00 is not relevant as we always want to post day-end, 
-      // however because we can skip multiple days when there is no data in the log we may not want an entry at 
-      // the end of the previous day as there may be no data in the IoTa log for that day.
-      //
-      // We will look at prev day and the day before next day and determine if we need to post prev day
+      // If just incrementing by 1 normal period all the time this special case of 00:00:00 is not 
+      // important as we always want to post day-end, 
+      // however because we can skip multiple days in one increment if there is no data in 
+      // the log for a given day we are skipping over then we dont want a end-of-day entry
+      // for it. I.e. Only include end-of-day entries for dayes which have some other data
+      // in them. We will always include start-of-day entries.
 
-      // Notice the localNextPostDt.unixtime() - 1 that will set to 23:59:59 of the day before the day next is in
+      // Notice the localNextPostDt.unixtime() - 1 below. That will calculate 23:59:59 of the day before the day next is in
       localNextPostDt = DateTime(localNextPostDt.year(), localNextPostDt.month(), localNextPostDt.day(), 0, 0, 0);
       unixNextPost = (localNextPostDt.unixtime() - 1)  - (localTimeDiff * 3600);
 
@@ -992,15 +1014,6 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   // Entry is for unixNextTime and reports data from the last config.reportInterval time
   entry->unixTime = unixNextPost;
 
-  // @todo I think we can remove this from entry again now
-  // PVOutput requires localized time, include it in the entry
-  uint32_t localUnixTime = entry->unixTime + (localTimeDiff * 3600);
-  entry->dt = DateTime(localUnixTime);
-
-  // The measurements should be such that:
-  // chan 1 : mains +ve indicates net import -ve indicates net export
-  // chan 2 : solar -ve indicates generation +ve should never really happen would indicate solar panels using power
-
   // Find the mean voltage since last post
   int voltageChannel = -1;
   if(config.mainsChannel >= 0) 
@@ -1028,18 +1041,6 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
 
 
   // Energy is calculated since begining of the day
-  //
-  // Generated energy is always a negative value in our calculations.
-  // I.e. I assume most power channels in existing iotawatt indicate
-  // power USAGE of that channel and are positive. In fact many have
-  // enabled ability to force them positive in the config.
-  //
-  // By using a negative value to indicate power generated/exported we have
-  // a consitent view of things
-  //
-  // Because a solar channel always generates and never uses power, we
-  // will enforce it has a negative value in the case the CT has been
-  // installed in reverse. 
   entry->energyGenerated = 0;
   if(config.solarChannel >= 0) 
   {
@@ -1047,7 +1048,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
     entry->energyGenerated = nextPostRecord.accum1[config.solarChannel] - dayStartRecord.accum1[config.solarChannel];
   }
 
-  // Find out how much energy we imported from the main line
+  // Find out how much energy we imported from the main grid
   double energyImported = 0.0;
   if(config.mainsChannel >= 0) 
   {
@@ -1073,19 +1074,32 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
     powerImported = powerImported / (nextPostRecord.logHours - prevPostRecord.logHours);
   }
 
+  // How many watts we permit it to report when actual power drain is 0
+  // There appears to be about 0.6W of usage reported from IoTaWatt when
+  // no CT is plugged in
+  const double PERMITTED_POWER_ZERO_ERROR = 1.0;
+
+  // The measurements should be such that:
+  // chan 1 : mains +ve indicates net import -ve indicates net export
+  // chan 2 : solar -ve indicates generation +ve should never really happen would indicate solar panels using power
+  //
+  // Using the measurements above is more consistent with existing views of channels in IoTaWatt
+  // I.e. Putting CT coils on each circuit in the house and expect to see +ve values
+  // for power use. We define power use are +ve and power generation/export as -ve
+
+  // If we think the solar channel should be reversed then invert it now
   if (solarChannelReversed)
   {
     entry->energyGenerated *= -1;
     entry->powerGenerated *= -1;
   }
 
-  // How many watts we permit it to report when actual power drain is 0
-  // There appears to be about 0.6W of usage when no CT is plugged in
-  const double PERMITTED_POWER_ZERO_ERROR = 1.0;
-
+  // Because a solar channel always generates and never uses power, we
+  // will enforce it has a negative value in the case the CT has been
+  // installed in reverse. 
   if(entry->powerGenerated > PERMITTED_POWER_ZERO_ERROR)
   {
-    log("pvoutput: At time: %s config appears incorrect or CT on solar is backwards. Power usage of solar channel is expected to be negative but is: %lfW", dateString(entry->unixTime).c_str(), entry->powerGenerated);
+    log("pvoutput: At time: %s config appears incorrect or CT on solar is backwards. Power usage of solar channel is expected to be negative but is: %lfW.", dateString(entry->unixTime).c_str(), entry->powerGenerated);
     entry->energyGenerated *= -1;
     entry->powerGenerated *= -1;
     solarChannelReversed = !solarChannelReversed;
@@ -1097,6 +1111,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
     trace(T_pvoutput,47);
   }
 
+  // If we think the mains channel is reversed then invert it now.
   if (mainsChannelReversed)
   {
     energyImported *= -1;
@@ -1175,12 +1190,14 @@ String PVOutput::GenerateEntryString(Entry entry)
     entry.powerConsumed = 0.0;
   }
 
+  uint32_t localUnixTime = entry.unixTime + (localTimeDiff * 3600);
+  DateTime dt = DateTime(localUnixTime);
   char dateStr[10];
-  snprintf(dateStr, sizeof(dateStr), "%04u%02u%02u", entry.dt.year(), entry.dt.month(), entry.dt.day());
+  snprintf(dateStr, sizeof(dateStr), "%04u%02u%02u", dt.year(), dt.month(), dt.day());
   dateStr[sizeof(dateStr) - 1] = 0;
 
   char timeStr[10];
-  snprintf(timeStr, sizeof(timeStr), "%02u:%02u", entry.dt.hour(), entry.dt.minute());
+  snprintf(timeStr, sizeof(timeStr), "%02u:%02u", dt.hour(), dt.minute());
   timeStr[sizeof(timeStr) - 1] = 0;
 
   //Date	Yes	yyyymmdd	date	20100830	r1	
