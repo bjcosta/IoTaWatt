@@ -76,7 +76,8 @@ private:
     DATE_TOO_OLD,
     DATE_IN_FUTURE,
     RATE_LIMIT,
-    MOON_POWERED
+    MOON_POWERED,
+    NO_STATUS
   };
 
   struct Config
@@ -430,6 +431,10 @@ PVOutput::PVOutputError PVOutput::InterpretPVOutputError(int responseCode, const
     {
       return PVOutputError::MOON_POWERED;
     }
+    else if (strstr(responseText.c_str(), "No status found") != nullptr)
+    {
+      return PVOutputError::NO_STATUS;
+    }
   }
   else if (responseCode == 403)
   {
@@ -751,12 +756,24 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   delete request;
   request = nullptr;
 
+
+  DateTime dt;
   if(responseCode != 200)
   {
     trace(T_pvoutput,28);
     log("pvoutput: last entry query failed: %d : %s", responseCode, responseText.c_str());
     switch (InterpretPVOutputError(responseCode, responseText))
     {
+    case PVOutputError::NO_STATUS:
+      trace(T_pvoutput,31);
+      // Assume roughly MAX_PAST_POST_TIME days ago is the last status. PVOutput not returning a value so use the oldest we can permit
+      // We need the dt in local time and the unixPrevPost in UTC
+      unixPrevPost = UNIXtime() - MAX_PAST_POST_TIME + 2 * config.MIN_REPORT_INTERVAL;
+      unixPrevPost -= unixPrevPost % config.reportInterval;
+      dt = DateTime(unixPrevPost + (localTimeDiff * 3600));
+      log("PVOutput reported no status available, this usually means it is a new configured PVOutput account or the existing history is too old. Will choose new start time as: %s", dateString(unixPrevPost).c_str());
+      break;
+
     // Wait for a while and try again errors
     case PVOutputError::RATE_LIMIT:
       trace(T_pvoutput,29);
@@ -773,19 +790,20 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
       return UNIXtime() + 1;
     }
   }
-
-  // Parse the date-time from the response text
-  DateTime dt;
-  if (!ParseGetStatusResponse(responseText, &dt))
+  else
   {
-    trace(T_pvoutput,31);
-    log("Failed to parse get status response from PVOutput trying request again : %s", responseText.c_str());
-    SetState(State::QUERY_GET_STATUS);
-    return UNIXtime() + 1;
-  }
+    // Parse the date-time from the response text
+    if (!ParseGetStatusResponse(responseText, &dt))
+    {
+      trace(T_pvoutput,31);
+      log("Failed to parse get status response from PVOutput trying request again : %s", responseText.c_str());
+      SetState(State::QUERY_GET_STATUS);
+      return UNIXtime() + 1;
+    }
 
-  // The datetime was given by PVOutput in local time, we need to adjust to UTC
-  unixPrevPost = dt.unixtime()  - (localTimeDiff * 3600);
+    // The datetime was given by PVOutput in local time, we need to adjust to UTC
+    unixPrevPost = dt.unixtime()  - (localTimeDiff * 3600);
+  }
 
   // Cases we care about:
   // * get normal : prev=get, next=get+interval, day=day of prev(or day of next after adjust) : adjust for day span boundary
