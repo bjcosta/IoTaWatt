@@ -1117,7 +1117,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   // installed in reverse. 
   if(entry->powerGenerated > PERMITTED_POWER_ZERO_ERROR)
   {
-    log("pvoutput: At time: %s config appears incorrect or CT on solar is backwards. Power usage of solar channel is expected to be negative but is: %lfW.", dateString(entry->unixTime).c_str(), entry->powerGenerated);
+    log("pvoutput: At time: %s config appears incorrect or CT on solar is backwards. Power usage of solar channel is expected to be negative but is: %lfW. Assuming reversed CT and continuing.", dateString(entry->unixTime).c_str(), entry->powerGenerated);
     entry->energyGenerated *= -1;
     entry->powerGenerated *= -1;
     solarChannelReversed = !solarChannelReversed;
