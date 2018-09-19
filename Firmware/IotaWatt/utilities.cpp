@@ -236,11 +236,17 @@ char*  JsonDetail(File file, JsonArray& locator){
 }
 
 
+String dateString(const DateTime& dt)
+{
+  char dateStr[23] = {0};
+  snprintf(dateStr, sizeof(dateStr), "%u/%u/%u %u:%u:%u", dt.month(), dt.day(), dt.year()%100, dt.hour(), dt.minute(), dt.second());
+  dateStr[sizeof(dateStr) - 1] = 0;
+  return String(dateStr);
+}
+
 String dateString(uint32_t UNIXtime){
     DateTime now = DateTime(UNIXtime + (localTimeDiff * 3600));
-  
-    return String(now.month()) + '/' + String(now.day()) + '/' + String(now.year()%100) + ' ' + 
-          timeString(now.hour()) + ':' + timeString(now.minute()) + ':' + timeString(now.second()) + ' ';
+    return dateString(now);
 }
 
 String timeString(int value){

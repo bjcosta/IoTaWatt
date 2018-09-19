@@ -2058,7 +2058,10 @@ function editPVOutput(){
                       systemId:0,
                       mainsChannel:0,
                       solarChannel:0,
-                      httpTimeout:2000
+                      httpTimeout:2000,
+                      reqDataLimit:4000,
+                      bulkSend:1,
+                      maxRetryCount:-1
                       };
     EbyId("serverDelete").style.display = "none";
     EbyId("serverHead").innerHTML = "Add PVOutput Service";
@@ -2070,10 +2073,10 @@ function editPVOutput(){
     EbyId("serverDelete").setAttribute("onclick","deletePVOutput();");
   }
   
-  var postInput =   addTableRow(serverTable, "Report Interval(sec): ", "reportInterval", "input", 3);
+  var postInput =   addTableRow(serverTable, "Report Interval(sec): ", "reportInterval", "input", 5);
   postInput.value = Number(config.pvoutput.reportInterval);
   postInput.setAttribute("onchange","config.pvoutput.reportInterval = Number(this.value); checkPVOutput();");
-  postInput.setAttribute("style","width: 40px;");
+  postInput.setAttribute("style","width: 100px;");
   postInput.type = "number";
   postInput.setAttribute("min","300");
   postInput.setAttribute("max","3600");
@@ -2085,17 +2088,19 @@ function editPVOutput(){
   keyInput.setAttribute("size","40");
   keyInput.pattern = "[0-9a-f]{40}";
   keyInput.title = "read/write key - 40 hexadecimal digits";
+  addTableText(serverTable,"","See <a href=\"https://pvoutput.org/account.jsp\">https://pvoutput.org/account.jsp</a>")
 
-  var systemInput =   addTableRow(serverTable, "System ID: ", "systemId", "input", 3);
+  var systemInput =   addTableRow(serverTable, "System ID: ", "systemId", "input", 7);
   systemInput.value = Number(config.pvoutput.systemId);
   systemInput.setAttribute("onchange","config.pvoutput.systemId = Number(this.value); checkPVOutput();");
-  systemInput.setAttribute("style","width: 40px;");
+  systemInput.setAttribute("style","width: 100px;");
   systemInput.type = "number";
   systemInput.setAttribute("min","0");
   systemInput.setAttribute("max","100000");
   systemInput.setAttribute("step","1");
+  addTableText(serverTable,"","See <a href=\"https://pvoutput.org/addsystem.jsp\">https://pvoutput.org/addsystem.jsp</a>")
 
-  var systemInput =   addTableRow(serverTable, "Mains Channel (-1 to disable): ", "mainsChannel", "input", 3);
+  var systemInput =   addTableRow(serverTable, "Mains Channel: ", "mainsChannel", "input", 3);
   systemInput.value = Number(config.pvoutput.mainsChannel);
   systemInput.setAttribute("onchange","config.pvoutput.mainsChannel = Number(this.value); checkPVOutput();");
   systemInput.setAttribute("style","width: 40px;");
@@ -2103,8 +2108,9 @@ function editPVOutput(){
   systemInput.setAttribute("min","-1");
   systemInput.setAttribute("max","16");
   systemInput.setAttribute("step","1");
+  addTableText(serverTable,"","Use -1 to disable")
 
-  var systemInput =   addTableRow(serverTable, "Solar Channel (-1 to disable): ", "solarChannel", "input", 3);
+  var systemInput =   addTableRow(serverTable, "Solar Channel: ", "solarChannel", "input", 3);
   systemInput.value = Number(config.pvoutput.solarChannel);
   systemInput.setAttribute("onchange","config.pvoutput.solarChannel = Number(this.value); checkPVOutput();");
   systemInput.setAttribute("style","width: 40px;");
@@ -2112,15 +2118,36 @@ function editPVOutput(){
   systemInput.setAttribute("min","-1");
   systemInput.setAttribute("max","16");
   systemInput.setAttribute("step","1");
+  addTableText(serverTable,"","Use -1 to disable")
 
-  var systemInput =   addTableRow(serverTable, "HTTP Timeout (msec): ", "httpTimeout", "input", 3);
+  var systemInput =   addTableRow(serverTable, "HTTP Timeout (msec): ", "httpTimeout", "input", 5);
   systemInput.value = Number(config.pvoutput.httpTimeout);
   systemInput.setAttribute("onchange","config.pvoutput.httpTimeout = Number(this.value); checkPVOutput();");
-  systemInput.setAttribute("style","width: 40px;");
+  systemInput.setAttribute("style","width: 100px;");
   systemInput.type = "number";
   systemInput.setAttribute("min","0");
   systemInput.setAttribute("max","100000");
   systemInput.setAttribute("step","1");
+
+  var systemInput =   addTableRow(serverTable, "Max Bulk Send: ", "bulkSend", "input", 3);
+  systemInput.value = Number(config.pvoutput.bulkSend);
+  systemInput.setAttribute("onchange","config.pvoutput.bulkSend = Number(this.value); checkPVOutput();");
+  systemInput.setAttribute("style","width: 40px;");
+  systemInput.type = "number";
+  systemInput.setAttribute("min","1");
+  systemInput.setAttribute("max","30");
+  systemInput.setAttribute("step","1");
+  addTableText(serverTable,"","Use 1 to send immediatly. Will delay update of PVOutput")
+
+  var systemInput =   addTableRow(serverTable, "Max Retries: ", "maxRetryCount", "input", 4);
+  systemInput.value = Number(config.pvoutput.maxRetryCount);
+  systemInput.setAttribute("onchange","config.pvoutput.maxRetryCount = Number(this.value); checkPVOutput();");
+  systemInput.setAttribute("style","width: 40px;");
+  systemInput.type = "number";
+  systemInput.setAttribute("min","-1");
+  systemInput.setAttribute("max","1000");
+  systemInput.setAttribute("step","1");
+  addTableText(serverTable,"","Use -1 to retry forever")
 }
 
 function checkPVOutput(){
@@ -2131,6 +2158,8 @@ function checkPVOutput(){
   if( ! validateInput("mainsChannel")) complete = false;
   if( ! validateInput("solarChannel")) complete = false;
   if( ! validateInput("httpTimeout")) complete = false;
+  if( ! validateInput("bulkSend")) complete = false;
+  if( ! validateInput("maxRetryCount")) complete = false;
   EbyId("serverSave").style.display = complete ? "inline" : "none";
 }
   
