@@ -1,5 +1,4 @@
 // @todo Need to test what is returned for getstatus() on a newly created PVOutput service, we want to make sure we do something sensible. I imagine right now just stay in infinite retry loop
-// @todo re-adjust all the trace logging values to be unique
 
 // @todo Ask Bob to make the asyncHTTPrequest::readyStates enum public. His code uses hard coded "4" all over the place, should just export the enum publicly and use named value for 4 which is readyStateDone
  
@@ -304,7 +303,7 @@ bool PVOutput::UpdateConfig(const char* jsonText)
   uint32_t reportInterval = configJson["reportInterval"].as<int>();
   if ((reportInterval % REPORT_INTERVAL_STEP_SIZE) != 0 || reportInterval < REPORT_INTERVAL_MIN)
   {
-    trace(T_pvoutput,4);
+    trace(T_pvoutput,5);
     log("pvoutput: Specified report interval: %d must be a multiple of %d and greater than: %d", reportInterval, REPORT_INTERVAL_STEP_SIZE, REPORT_INTERVAL_MIN);
     Stop();
     return false;
@@ -314,14 +313,14 @@ bool PVOutput::UpdateConfig(const char* jsonText)
   uint32_t bulkSend = configJson["bulkSend"].as<unsigned int>();
   if (bulkSend > MAX_BULK_SEND)
   {
-    trace(T_pvoutput,4);
+    trace(T_pvoutput,6);
     log("pvoutput: Specified bulk send: %d must be less than: %d", bulkSend, MAX_BULK_SEND + 1);
     Stop();
     return false;
   }
   config.bulkSend = bulkSend;
 
-  trace(T_pvoutput,5);
+  trace(T_pvoutput,7);
   config.revision = revision;
   config.systemId = configJson["systemId"].as<int>();
   config.mainsChannel = configJson["mainsChannel"].as<int>();
@@ -333,10 +332,10 @@ bool PVOutput::UpdateConfig(const char* jsonText)
   config.apiKey = charstar(configJson["apiKey"].as<const char*>());
 
   // Start or re-start the PVOutput service with the new config
-  trace(T_pvoutput,6);
+  trace(T_pvoutput,8);
   Start();
 
-  trace(T_pvoutput,7);
+  trace(T_pvoutput,9);
   log("pvoutput: Loaded PVOutput config using: revision:%d, systemID:%d, mainsChannel:%d, solarChannel:%d, HTTPTimeout:%d, interval:%d, ApiKey:<private>, maxRetry:%d, bulkSend:%u", config.revision, config.systemId, config.mainsChannel, config.solarChannel, config.httpTimeout, config.reportInterval, config.maxRetryCount, config.bulkSend);
 
   return true;
@@ -345,7 +344,7 @@ bool PVOutput::UpdateConfig(const char* jsonText)
 //=============================================================================
 void PVOutput::GetStatusJson(JsonObject& json) const
 {
-  trace(T_pvoutput,8);
+  trace(T_pvoutput,10);
 
   // Write out our state into json so it can be used in web services
   json.set(F("state"), StateToString(state));
@@ -392,7 +391,7 @@ uint32_t PVOutput::Tick(struct serviceBlock* serviceBlock)
       // Fall through to do the same as STOPPING
 
     case State::STOPPING: 
-      trace(T_pvoutput,9);
+      trace(T_pvoutput,11);
       SetState(State::STOPPED);
       return 0;
   }
@@ -412,12 +411,12 @@ void PVOutput::Start()
   // If the service has actually stopped (not STOPPING) then we need to re-add it.
   if (state == State::STOPPED)
   {
-    trace(T_pvoutput,10);
+    trace(T_pvoutput,12);
     logd("pvoutput: Service is not running, creating new service to be added to service tick queue");
     NewService(&PVOutputTick);
   }
 
-  trace(T_pvoutput,11);
+  trace(T_pvoutput,13);
   SetState(State::INITIALIZE);
 }
 
@@ -426,12 +425,12 @@ void PVOutput::Stop()
 {
   if (state == State::STOPPED || state == State::STOPPING)
   {
-    trace(T_pvoutput,12);
+    trace(T_pvoutput,14);
     return;
   }
 
   log("pvoutput: Stopping PVOutput service");
-  trace(T_pvoutput,13);
+  trace(T_pvoutput,15);
 
   // The service queue does not permit removal of a service. Instead it requires
   // the service be ticked and that tick return 0 to stop it.
@@ -442,7 +441,7 @@ void PVOutput::Stop()
   // Need to cancel any outstanding requests, reset all objects to initial states
   if (request != nullptr) 
   {
-    trace(T_pvoutput,14);
+    trace(T_pvoutput,16);
     request->abort();
     FinishHttpRequest();
   }
@@ -642,10 +641,10 @@ bool PVOutput::ParseGetStatusResponse(const String& responseText, DateTime* dt)
   src = ParseExpectedCharacter(src, ',');
   if (src == nullptr)
   {
-    trace(T_pvoutput,15);
+    trace(T_pvoutput,17);
     return false;
   }
-  trace(T_pvoutput,16);
+  trace(T_pvoutput,18);
 
   logd("pvoutput: Parsed status date/time: %u %u %u %u %u", year, month, day, hour, minute);
   *dt = DateTime(year, month, day, hour, minute, 0);
@@ -714,7 +713,7 @@ uint32_t PVOutput::CalculateDayStart(uint32_t ts)
 {
   DateTime localDt(ts + (localTimeDiff * 3600));
 
-  trace(T_pvoutput,17);
+  trace(T_pvoutput,19);
   DateTime localDayStart(localDt.year(), localDt.month(), localDt.day(), 00, 00, 00);
   uint32_t dayStart = localDayStart.unixtime() - (localTimeDiff * 3600);
 
@@ -728,11 +727,11 @@ uint32_t PVOutput::TickInitialize(struct serviceBlock* serviceBlock)
 {
   if (!currLog.isOpen())
   {
-    trace(T_pvoutput,18);
+    trace(T_pvoutput,20);
     return UNIXtime() + 5;
   }
 
-  trace(T_pvoutput,19);
+  trace(T_pvoutput,21);
   serviceBlock->priority = priorityLow;
   SetState(State::QUERY_GET_STATUS);
   return 1;
@@ -741,7 +740,7 @@ uint32_t PVOutput::TickInitialize(struct serviceBlock* serviceBlock)
 //=============================================================================
 uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
 {
-  trace(T_pvoutput,20);
+  trace(T_pvoutput,22);
   unixPrevPost = 0;
 
   StartHttpRequest();
@@ -759,7 +758,7 @@ uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
   request->setReqHeader("Content-Type", "application/x-www-form-urlencoded"); 
   request->setReqHeader("X-Pvoutput-Apikey", config.apiKey); 
   request->setReqHeader("X-Pvoutput-SystemId", String(config.systemId).c_str()); 
-  trace(T_pvoutput,22);
+  trace(T_pvoutput,23);
   reqData = "";
   if(request->debug())
   {
@@ -775,13 +774,13 @@ uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
   if (!request->send((uint8_t*)reqData.c_str(), reqData.length()))
   {
     // Try again in a little while
-    trace(T_pvoutput,23);
+    trace(T_pvoutput,24);
     log("pvoutput: Sending getstatus GET request failed");
     FinishHttpRequest();
     return UNIXtime() + 5;
   }
 
-  trace(T_pvoutput,24);
+  trace(T_pvoutput,25);
   SetState(State::QUERY_GET_STATUS_WAIT_RESPONSE);
   return 1;
 }
@@ -790,15 +789,15 @@ uint32_t PVOutput::TickQueryGetStatus(struct serviceBlock* serviceBlock)
 uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBlock)
 {
   // If not completed, return to wait.
-  trace(T_pvoutput,25);
+  trace(T_pvoutput,26);
 
   if(request->readyState() != 4)
   {
-    trace(T_pvoutput,26);
+    trace(T_pvoutput,27);
     return UNIXtime() + 1;
   }
 
-  trace(T_pvoutput,27);
+  trace(T_pvoutput,28);
   String responseText = request->responseText();
   int responseCode = request->responseHTTPcode();
   FinishHttpRequest();
@@ -807,12 +806,12 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   DateTime dt;
   if(responseCode != 200)
   {
-    trace(T_pvoutput,28);
+    trace(T_pvoutput,29);
     log("pvoutput: last entry query failed: %d : %s", responseCode, responseText.c_str());
     switch (InterpretPVOutputError(responseCode, responseText))
     {
     case PVOutputError::NO_STATUS:
-      trace(T_pvoutput,31);
+      trace(T_pvoutput,30);
       // Assume roughly MAX_PAST_POST_TIME days ago is the last status. PVOutput not returning a value so use the oldest we can permit
       // We need the dt in local time and the unixPrevPost in UTC
       unixPrevPost = UNIXtime() - MAX_PAST_POST_TIME + 2 * REPORT_INTERVAL_MIN;
@@ -823,7 +822,7 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
 
     // Wait for a while and try again errors
     case PVOutputError::RATE_LIMIT:
-      trace(T_pvoutput,29);
+      trace(T_pvoutput,31);
       return UNIXtime() + config.reportInterval;
 
     // Retry errors (Would reset the PVOutput service but it is already in first state)
@@ -832,7 +831,7 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
     case PVOutputError::UNMAPPED_ERROR:
     case PVOutputError::DATE_TOO_OLD:
     case PVOutputError::DATE_IN_FUTURE:
-      trace(T_pvoutput,30);
+      trace(T_pvoutput,32);
       SetState(State::QUERY_GET_STATUS);
       return UNIXtime() + 1;
     }
@@ -842,7 +841,7 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
     // Parse the date-time from the response text
     if (!ParseGetStatusResponse(responseText, &dt))
     {
-      trace(T_pvoutput,31);
+      trace(T_pvoutput,33);
       log("pvoutput: Failed to parse get status response from PVOutput trying request again : %s", responseText.c_str());
       SetState(State::QUERY_GET_STATUS);
       return UNIXtime() + 1;
@@ -897,7 +896,7 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
   // For pvoutput we have to report energy accumulated each day (in addition to accumulated since last tick), 
   // so we need to read the last record seen the day before and use that as the "reference"
   // When the day ticks over, then we will update the reference
-  trace(T_pvoutput,35);
+  trace(T_pvoutput,34);
   logd("pvoutput: unixDayStart: %s, unixPrevPost: %s, unixNextPost: %s, now: %s, lastKey: %s", 
     dateString(unixDayStart).c_str(),
     dateString(unixPrevPost).c_str(),
@@ -923,19 +922,19 @@ bool PVOutput::ReadSaneLogRecordOrPrev(IotaLogRecord* record, uint32_t when)
   // Check for NaN
   if(record->serial != record->serial)
   {
-    trace(T_pvoutput,36);
+    trace(T_pvoutput,35);
     record->serial = 0;
   }
 
   if(record->UNIXtime != record->UNIXtime)
   {
-    trace(T_pvoutput,37);
+    trace(T_pvoutput,36);
     record->UNIXtime = 0;
   }
 
   if(record->logHours != record->logHours)
   {
-    trace(T_pvoutput,38);
+    trace(T_pvoutput,37);
     record->logHours = 0;
   }
 
@@ -943,13 +942,13 @@ bool PVOutput::ReadSaneLogRecordOrPrev(IotaLogRecord* record, uint32_t when)
   {
     if(record->accum1[i] != record->accum1[i]) 
     {
-      trace(T_pvoutput,39);
+      trace(T_pvoutput,38);
       record->accum1[i] = 0;
     }
 
     if(record->accum2[i] != record->accum2[i]) 
     {
-      trace(T_pvoutput,40);
+      trace(T_pvoutput,39);
       record->accum2[i] = 0;
     }
   }
@@ -1057,12 +1056,12 @@ void PVOutput::IncrementTimeInterval(size_t incrementPeriods, const char* entryD
   const char* message = "";
   if (localPrevPostDt.day() != localNextPostDt.day() || localPrevPostDt.month() != localNextPostDt.month() || localPrevPostDt.year() != localNextPostDt.year())
   {
-    trace(T_pvoutput,41);
+    trace(T_pvoutput,40);
     message = "Started a new day for log accumulation";
   }
   else
   {
-    trace(T_pvoutput,42);
+    trace(T_pvoutput,41);
     message = "Still in same day for log accumulation";
   }
   unixDayStart = CalculateDayStart(unixNextPost);
@@ -1105,7 +1104,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   entry->voltage = 0;
   if (voltageChannel >= 0 && nextPostRecord.logHours != prevPostRecord.logHours)
   {
-    trace(T_pvoutput,43);
+    trace(T_pvoutput,42);
     entry->voltage = (nextPostRecord.accum1[voltageChannel] - prevPostRecord.accum1[voltageChannel]);
     entry->voltage /= logHours;
   }
@@ -1115,7 +1114,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   entry->energyGenerated = 0;
   if(config.solarChannel >= 0) 
   {
-    trace(T_pvoutput,44);
+    trace(T_pvoutput,43);
     entry->energyGenerated = nextPostRecord.accum1[config.solarChannel] - dayStartRecord.accum1[config.solarChannel];
   }
 
@@ -1123,7 +1122,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   double energyImported = 0.0;
   if(config.mainsChannel >= 0) 
   {
-    trace(T_pvoutput,45);
+    trace(T_pvoutput,44);
     energyImported = nextPostRecord.accum1[config.mainsChannel] - dayStartRecord.accum1[config.mainsChannel];
   }
 
@@ -1131,7 +1130,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   entry->powerGenerated = 0;
   if (config.solarChannel >= 0 && nextPostRecord.logHours != prevPostRecord.logHours) 
   {
-    trace(T_pvoutput,46);
+    trace(T_pvoutput,45);
     entry->powerGenerated = nextPostRecord.accum1[config.solarChannel] - prevPostRecord.accum1[config.solarChannel];
     entry->powerGenerated = entry->powerGenerated / (nextPostRecord.logHours - prevPostRecord.logHours);
   }
@@ -1140,7 +1139,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   double powerImported = 0.0;
   if (config.mainsChannel >= 0 && nextPostRecord.logHours != prevPostRecord.logHours) 
   {
-    trace(T_pvoutput,48);
+    trace(T_pvoutput,46);
     powerImported = nextPostRecord.accum1[config.mainsChannel] - prevPostRecord.accum1[config.mainsChannel];
     powerImported = powerImported / (nextPostRecord.logHours - prevPostRecord.logHours);
   }
@@ -1192,7 +1191,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   // If we are exporting more than we are generating something is wrong
   if ((powerImported + PERMITTED_POWER_ZERO_ERROR) < (entry->powerGenerated - PERMITTED_POWER_ZERO_ERROR))
   {
-    trace(T_pvoutput,49);
+    trace(T_pvoutput,48);
     log("pvoutput: At time: %s config appears incorrect or CT on mains import/export is backwards. Power imported: %lfW is less than solar power used: %lf swapping sign of power imported. We are pushing more power to the grid than we are generating via solar", dateString(entry->unixTime).c_str(), powerImported, entry->powerGenerated);
     energyImported *= -1;
     powerImported *= -1;
@@ -1202,7 +1201,7 @@ bool PVOutput::CalculateEntry(Entry* entry, const IotaLogRecord& prevPostRecord,
   if ((energyImported + (logHours * PERMITTED_POWER_ZERO_ERROR) < entry->energyGenerated - (logHours * PERMITTED_POWER_ZERO_ERROR)))
   {
     log("pvoutput: Warning at time: %s even after reversal mains energy usage (%lf) is not less than solar energy generation (%lf)", dateString(entry->unixTime).c_str(), energyImported, entry->energyGenerated);
-    trace(T_pvoutput,47);
+    trace(T_pvoutput,49);
   }
 
   // Example:
@@ -1461,7 +1460,7 @@ bool PVOutput::CollectNextDataPoint()
   uint32_t now = UNIXtime();
   if (unixNextPost + MAX_PAST_POST_TIME < now)
   {
-    trace(T_pvoutput,33);
+    trace(T_pvoutput,70);
     uint32_t oldestAcceptable = now - MAX_PAST_POST_TIME;
     uint32_t diff = oldestAcceptable - unixNextPost;
     size_t periodsToSkip = (diff / config.reportInterval) + 1;
@@ -1473,7 +1472,7 @@ bool PVOutput::CollectNextDataPoint()
   IotaLogRecord prevPostRecord;
   if (!ReadSaneLogRecordOrPrev(&prevPostRecord, unixPrevPost))
   {
-    trace(T_pvoutput,70);
+    trace(T_pvoutput,71);
     log("pvoutput: Failed to read prev post log record");
     // Dont move forward on failure so we get a bug report
     return false;
@@ -1489,7 +1488,7 @@ bool PVOutput::CollectNextDataPoint()
   IotaLogRecord nextPostRecord;
   if (!ReadSaneLogRecordOrPrev(&nextPostRecord, unixNextPost + additional_time))
   {
-    trace(T_pvoutput,71);
+    trace(T_pvoutput,72);
     log("pvoutput: Failed to read next post log record");
     // Dont move forward on failure so we get a bug report
     return false;
@@ -1503,19 +1502,19 @@ bool PVOutput::CollectNextDataPoint()
   double elapsedHours = nextPostRecord.logHours - prevPostRecord.logHours;
   if(elapsedHours == 0 && !(localNextPostDt.hour() == 0 && localNextPostDt.minute() == 0 && localNextPostDt.second() == 0))
   {
-    trace(T_pvoutput,72);
+    trace(T_pvoutput,73);
     size_t periodsToSkip = CalculateMissingPeriodsToSkip(prevPostRecord, nextPostRecord);
     IncrementTimeInterval(periodsToSkip, "<no entry> Skipping empty IoTa log entries");
     return true;  
   }
-  trace(T_pvoutput,73);
+  trace(T_pvoutput,74);
 
   // Otherwise we have some data we need to POST, get the remaining data and
   // prepare the request
   IotaLogRecord dayStartRecord;
   if (!ReadSaneLogRecordOrPrev(&dayStartRecord, unixDayStart))
   {
-    trace(T_pvoutput,74);
+    trace(T_pvoutput,75);
     log("pvoutput: Failed to read day start log record");
     // Dont move forward on failure so we get a bug report
     return false;
@@ -1524,7 +1523,7 @@ bool PVOutput::CollectNextDataPoint()
   Entry entry;
   if (!CalculateEntry(&entry, prevPostRecord, nextPostRecord, dayStartRecord))
   {
-    trace(T_pvoutput,75);
+    trace(T_pvoutput,76);
     // Dont move forward on failure so we get a bug report
     return false;
   }
@@ -1566,7 +1565,7 @@ uint32_t PVOutput::TickCollateData(struct serviceBlock* serviceBlock)
   bool isRequestBufferFull = reqEntries >= MAX_BULK_SEND || reqData.length() >= REQUEST_DATA_LIMIT;
   if (isRequestAvailable && (realtimePost || isRequestBufferFull))
   {
-    trace(T_pvoutput,76);
+    trace(T_pvoutput,77);
     SetState(State::POST_DATA);
     return 1;
   }
@@ -1582,23 +1581,23 @@ void PVOutput::StartHttpRequest()
   // Need to cancel any outstanding requests, reset all objects to initial states
   if (request != nullptr) 
   {
-    trace(T_pvoutput,14);
+    trace(T_pvoutput,78);
     request->abort();
     delete request;
     request = nullptr;
   }
 
-  trace(T_pvoutput,77);
+  trace(T_pvoutput,79);
   if (!WiFi.isConnected())
   {
-    trace(T_pvoutput,78);
+    trace(T_pvoutput,80);
     return;
   }
 
   // Make sure there's enough memory
   if (ESP.getFreeHeap() < MIN_REQUIRED_HEAP)
   {
-    trace(T_pvoutput,79);
+    trace(T_pvoutput,81);
     log("pvoutput: Insufficient heap available waiting for it to free up");
     return;
   }
@@ -1643,7 +1642,7 @@ uint32_t PVOutput::TickPostData(struct serviceBlock* serviceBlock)
   // reqData already has all the data we want to POST in it
   // This data should also already be prefixed with: 
   // c1=0&n=0&data=
-  trace(T_pvoutput,80);
+  trace(T_pvoutput,82);
   if(request->debug())
   {
     Serial.println(ESP.getFreeHeap()); 
@@ -1653,12 +1652,12 @@ uint32_t PVOutput::TickPostData(struct serviceBlock* serviceBlock)
     Serial.println(reqData);
   }
 
-  trace(T_pvoutput,81);
+  trace(T_pvoutput,83);
   logd("pvoutput: curl -d \"%s\" -H \"X-Pvoutput-Apikey: %s\" -H \"X-Pvoutput-SystemId: %u\" \"http://pvoutput.org/service/r2/addbatchstatus.jsp\"", reqData.c_str(), "<private>", config.systemId);
   if (!request->send((uint8_t*)reqData.c_str(), reqData.length()))
   {
     // Try again in a little while
-    trace(T_pvoutput,82);
+    trace(T_pvoutput,84);
     log("pvoutput: Sending POST request failed, trying again in a few seconds");
     FinishHttpRequest();
     return UNIXtime() + 5;
@@ -1671,7 +1670,7 @@ uint32_t PVOutput::TickPostData(struct serviceBlock* serviceBlock)
 //=============================================================================
 uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
 {
-  trace(T_pvoutput,83);
+  trace(T_pvoutput,85);
   assert(request != nullptr);
 
   // If not yet ready, then wait
@@ -1680,7 +1679,7 @@ uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
     return UNIXtime() + 1;
   }
 
-  trace(T_pvoutput,84);
+  trace(T_pvoutput,86);
   int responseCode = request->responseHTTPcode();
   String responseText = request->responseText();
   FinishHttpRequest();
@@ -1688,20 +1687,20 @@ uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
   int16_t maxRetryCountToUse = config.maxRetryCount;
   if(responseCode != 200)
   {
-    trace(T_pvoutput,85);
+    trace(T_pvoutput,87);
     log("pvoutput: Post Failed: %d : %s", responseCode, responseText.c_str());
     switch (InterpretPVOutputError(responseCode, responseText))
     {
       // This one will fall through and be treated like a success
       // I.e. We are skipping this data
       case PVOutputError::DATE_TOO_OLD:
-        trace(T_pvoutput,86);
+        trace(T_pvoutput,88);
         log("pvoutput: Skipping data that is known to be too old and will never be accepted by pvoutput.");
         // Break to treat as success case resulting in data being skipped
         break;
 
       case PVOutputError::MOON_POWERED:
-        trace(T_pvoutput,86);
+        trace(T_pvoutput,89);
         log("pvoutput: Skipping data that PVOutput thinks is invalid.");
         // Break to treat as success case resulting in data being skipped
         break;
@@ -1715,7 +1714,7 @@ uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
         //
         // There are issues with the midnight time boundary and PVOutput I have seen 
         // it fail with DATE_IN_FUTURE upto 1 hour past expected time.
-        trace(T_pvoutput,87);
+        trace(T_pvoutput,90);
         ++retryCount;
 
         // These errors NEVER skip to override maxRetryCountToUse to never skip 
@@ -1725,12 +1724,12 @@ uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
       case PVOutputError::NONE:
       case PVOutputError::UNMAPPED_ERROR:
       default:
-        trace(T_pvoutput,89);
+        trace(T_pvoutput,91);
 
         // If we want to retry then do so
         if (maxRetryCountToUse < 0 || retryCount < maxRetryCountToUse)
         {
-          trace(T_pvoutput,88);
+          trace(T_pvoutput,92);
           SetState(State::POST_DATA);
           logd("pvoutput: Retrying post again in %u seconds", config.reportInterval);
           return UNIXtime() + config.reportInterval;
@@ -1744,7 +1743,7 @@ uint32_t PVOutput::TickPostDataWaitResponse(struct serviceBlock* serviceBlock)
   }
 
   // POST was successful, go back into loop reading new post data
-  trace(T_pvoutput,90);
+  trace(T_pvoutput,93);
   retryCount = 0;
   reqData = "";
   reqEntries = 0;
