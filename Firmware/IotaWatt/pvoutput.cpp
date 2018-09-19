@@ -349,9 +349,12 @@ void PVOutput::GetStatusJson(JsonObject& json) const
 
   // Write out our state into json so it can be used in web services
   json.set(F("state"), StateToString(state));
-  json.set(F("unixDayStart"), dateString(unixDayStart));
-  json.set(F("unixPrevPost"), dateString(unixPrevPost));
-  json.set(F("unixNextPost"), dateString(unixNextPost));
+  json.set(F("dayStart"), dateString(unixDayStart));
+  json.set(F("prevPost"), dateString(unixPrevPost));
+  json.set(F("nextPost"), dateString(unixNextPost));
+  json.set(F("unixDayStart"), unixDayStart);
+  json.set(F("unixPrevPost"), unixPrevPost);
+  json.set(F("unixNextPost"), unixNextPost);
   json.set(F("mainsChannelReversed"), mainsChannelReversed);
   json.set(F("solarChannelReversed"), solarChannelReversed);
   json.set(F("reqEntries"), reqEntries);
