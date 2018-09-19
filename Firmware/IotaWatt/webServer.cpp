@@ -458,7 +458,7 @@ void handleStatus(){
   }
 
   if(server.hasArg(F("pvoutput"))){
-    trace(T_WEB,23); // @todo
+    trace(T_WEB,23);
     JsonObject& pvoutput = jsonBuffer.createObject();
     PVOutputGetStatusJson(pvoutput);
     root["pvoutput"] = pvoutput;
