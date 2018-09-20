@@ -1,8 +1,3 @@
-// @todo Need to test what is returned for getstatus() on a newly created PVOutput service, we want to make sure we do something sensible. I imagine right now just stay in infinite retry loop
-
-// @todo Ask Bob to make the asyncHTTPrequest::readyStates enum public. His code uses hard coded "4" all over the place, should just export the enum publicly and use named value for 4 which is readyStateDone
- 
-
 // Implements an output POST service that sends power data to PVOutput using the API defined at: 
 // https://pvoutput.org/help.html#api-spec
 #include "pvoutput.h"
@@ -811,6 +806,9 @@ uint32_t PVOutput::TickQueryGetStatusWaitResponse(struct serviceBlock* serviceBl
     switch (InterpretPVOutputError(responseCode, responseText))
     {
     case PVOutputError::NO_STATUS:
+      // On a brand new PVOutput system we see response: "Bad request 400: No status found"
+      // This also happens on systems that have not uploaded data for a long time
+
       trace(T_pvoutput,30);
       // Assume roughly MAX_PAST_POST_TIME days ago is the last status. PVOutput not returning a value so use the oldest we can permit
       // We need the dt in local time and the unixPrevPost in UTC
